@@ -71,8 +71,8 @@ def display_prediction_with_confidence(prediction: Dict):
     if 'predictions' in prediction:
         st.markdown("### Farklı Güven Seviyeli Tahminler")
 
+        # Güven seviyeleri için sekmeler
         tabs = st.tabs(["Yüksek Güven", "Orta Güven", "Düşük Güven"])
-
         confidence_colors = {
             'yüksek': '#2ecc71',  # Yeşil
             'orta': '#f1c40f',    # Sarı
@@ -83,24 +83,19 @@ def display_prediction_with_confidence(prediction: Dict):
             with tab:
                 if level in prediction['predictions']:
                     pred = prediction['predictions'][level]
+                    st.markdown(f"### {level.title()} Güvenli Tahmin")
 
+                    # Tahmin detayları
                     col1, col2 = st.columns(2)
                     with col1:
-                        st.markdown(f"**Tahmin Detayları**")
+                        st.markdown("**Tahmin Detayları**")
                         st.markdown(f"Olasılık: **{pred['probability']:.1%}**")
                         if 'reason' in pred:
                             st.markdown(f"Tahmin Nedeni: *{pred['reason'].replace('_', ' ').title()}*")
 
-                        if 'quality_factors' in pred:
-                            st.markdown("**Kalite Faktörleri:**")
-                            for factor, value in pred['quality_factors'].items():
-                                st.progress(value, 
-                                          text=f"{factor.replace('_', ' ').title()}: {value:.1%}")
-
                     with col2:
                         if 'probability' in pred:
                             import plotly.graph_objects as go
-
                             fig = go.Figure(go.Indicator(
                                 mode = "gauge+number",
                                 value = pred['probability'] * 100,
@@ -116,58 +111,87 @@ def display_prediction_with_confidence(prediction: Dict):
                                     ]
                                 }
                             ))
-
                             fig.update_layout(height=250)
                             st.plotly_chart(fig, use_container_width=True)
+
+                    # Kalite faktörleri
+                    if 'quality_factors' in pred:
+                        st.markdown("**Kalite Faktörleri**")
+                        for factor, value in pred['quality_factors'].items():
+                            st.progress(value, text=f"{factor.replace('_', ' ').title()}: {value:.1%}")
                 else:
                     st.warning(f"Bu güven seviyesinde tahmin bulunmuyor.")
 
-    # Momentum ve maç durumu bilgileri
+    # Maç durumu ve momentum bilgileri
     if 'momentum' in prediction and 'match_state' in prediction:
-        with st.expander("Detaylı Maç Analizi"):
-            col1, col2 = st.columns(2)
+        st.markdown("### Maç ve Momentum Analizi")
+        col1, col2 = st.columns(2)
 
-            with col1:
-                st.write("**Maç Durumu**")
-                if 'phase' in prediction['match_state']:
-                    st.markdown(f"**Faz:** {prediction['match_state']['phase'].replace('_', ' ').title()}")
-                if 'intensity' in prediction['match_state']:
-                    st.progress(prediction['match_state']['intensity'], 
-                              text=f"Maç Yoğunluğu: {prediction['match_state']['intensity']:.1%}")
+        with col1:
+            st.markdown("**Maç Durumu**")
+            if 'phase' in prediction['match_state']:
+                st.markdown(f"**Faz:** {prediction['match_state']['phase'].replace('_', ' ').title()}")
+            if 'intensity' in prediction['match_state']:
+                st.progress(prediction['match_state']['intensity'], 
+                          text=f"Maç Yoğunluğu: {prediction['match_state']['intensity']:.1%}")
 
-            with col2:
-                st.write("**Momentum Analizi**")
-                if 'trend' in prediction['momentum']:
-                    st.markdown(f"**Trend:** {prediction['momentum']['trend'].replace('_', ' ').title()}")
-                if 'total' in prediction['momentum']:
-                    st.progress(min(1.0, prediction['momentum']['total']), 
-                              text=f"Toplam Momentum: {min(1.0, prediction['momentum']['total']):.1%}")
+        with col2:
+            st.markdown("**Momentum Analizi**")
+            if 'trend' in prediction['momentum']:
+                st.markdown(f"**Trend:** {prediction['momentum']['trend'].replace('_', ' ').title()}")
+            if 'total' in prediction['momentum']:
+                st.progress(min(1.0, prediction['momentum']['total']), 
+                          text=f"Toplam Momentum: {min(1.0, prediction['momentum']['total']):.1%}")
 
-                # Momentum grafiği
-                if all(k in prediction['momentum'] for k in ['home', 'away']):
-                    import plotly.express as px
+        # Momentum grafiği
+        if all(k in prediction['momentum'] for k in ['home', 'away']):
+            import plotly.express as px
+            momentum_data = {
+                'Takım': ['Ev Sahibi', 'Deplasman'],
+                'Momentum': [
+                    prediction['momentum']['home'],
+                    prediction['momentum']['away']
+                ]
+            }
+            fig = px.bar(momentum_data, 
+                        x='Takım', 
+                        y='Momentum',
+                        color='Takım',
+                        text=[f'{v:.1%}' for v in momentum_data['Momentum']])
+            fig.update_layout(
+                title='Takım Momentumları',
+                showlegend=False,
+                height=250
+            )
+            st.plotly_chart(fig, use_container_width=True)
 
-                    momentum_data = {
-                        'Takım': ['Ev Sahibi', 'Deplasman'],
-                        'Momentum': [
-                            prediction['momentum']['home'],
-                            prediction['momentum']['away']
-                        ]
-                    }
+def display_player_analysis(player_stats: Dict):
+    """Oyuncu analiz sonuçlarını göster"""
+    if not player_stats:
+        st.warning("Oyuncu analizi için yeterli veri yok.")
+        return
 
-                    fig = px.bar(momentum_data, 
-                                x='Takım', 
-                                y='Momentum',
-                                color='Takım',
-                                text=[f'{v:.1%}' for v in momentum_data['Momentum']])
+    st.subheader("Oyuncu Performans Analizi")
 
-                    fig.update_layout(
-                        title='Takım Momentumları',
-                        showlegend=False,
-                        height=250
-                    )
+    # Oyuncuları performans skorlarına göre sırala
+    sorted_players = sorted(
+        player_stats.items(),
+        key=lambda x: x[1]['rating'],
+        reverse=True
+    )
 
-                    st.plotly_chart(fig, use_container_width=True)
+    # Her oyuncu için bir sekme oluştur
+    player_tabs = st.tabs([f"{stats['name']} ({stats['team']})" for _, stats in sorted_players])
+
+    for tab, (player_id, stats) in zip(player_tabs, sorted_players):
+        with tab:
+            st.markdown(f"### Puan: {stats['rating']:.1f}/10")
+            st.markdown(f"**Performans Özeti:** {stats['summary']}")
+
+            if stats.get('key_moments'):
+                st.markdown("**Önemli Anlar**")
+                for moment in stats['key_moments']:
+                    st.info(f"{moment['time']}' - {moment['event_type']}")
 
 def display_match_details(fixture_id, match_info):
     """Display detailed statistics and events for a match"""
@@ -415,135 +439,3 @@ def display_team_analysis(analysis: Dict, team_type: str):
                 'last_15': 'Son 15 dakika'
             }[period]
             st.progress(score, text=f"{period_name}: {score:.2f}")
-
-def display_player_analysis(player_stats: Dict):
-    """Oyuncu analiz sonuçlarını göster"""
-    if not player_stats:
-        st.warning("Oyuncu analizi için yeterli veri yok.")
-        return
-
-    st.subheader("Oyuncu Performans Analizi")
-
-    # Oyuncuları performans skorlarına göre sırala
-    sorted_players = sorted(
-        player_stats.items(),
-        key=lambda x: x[1]['rating'],
-        reverse=True
-    )
-
-    for player_id, stats in sorted_players:
-        with st.expander(f"{stats['name']} ({stats['team']}) - Puan: {stats['rating']:.1f}/10"):
-            st.write(f"**Performans Özeti:** {stats['summary']}")
-
-            if stats.get('key_moments'):
-                st.write("**Önemli Anlar:**")
-                for moment in stats['key_moments']:
-                    st.info(f"{moment['time']}' - {moment['event_type']}")
-
-def display_match_details(fixture_id, match_info):
-    """Display detailed statistics and events for a match"""
-    try:
-        with st.spinner("Maç detayları yükleniyor..."):
-            # Get match statistics
-            stats = st.session_state.data_handler.get_match_statistics(fixture_id)
-            events = st.session_state.data_handler.get_match_events(fixture_id)
-
-            if not stats:
-                logger.warning(f"No statistics available for fixture {fixture_id}")
-                st.warning("Maç istatistikleri şu an için mevcut değil.")
-                return
-
-            # Score information
-            score = [match_info['goals']['home'], match_info['goals']['away']]
-
-            # Calculate live win probabilities
-            win_probs = calculate_live_win_probability(stats, score)
-
-            # Detaylı performans analizi
-            try:
-                if hasattr(st.session_state, 'performance_analyzer'):
-                    performance_analysis = st.session_state.performance_analyzer.analyze_team_performance(stats, events)
-                    player_analysis = st.session_state.performance_analyzer.analyze_player_performance(events)
-                else:
-                    logger.error("Performance analyzer not initialized")
-                    performance_analysis = None
-                    player_analysis = None
-            except Exception as e:
-                logger.error(f"Error in performance analysis: {str(e)}")
-                performance_analysis = None
-                player_analysis = None
-
-            # AI Commentary Section
-            if st.session_state.commentator is not None:
-                st.subheader("Maç Yorumu")
-                commentary = st.session_state.commentator.generate_match_commentary(stats, score, events)
-                st.markdown(f"💬 {commentary}")
-
-                # Next Goal Prediction
-                next_goal = st.session_state.commentator.predict_next_goal(stats, events)
-                display_prediction_with_confidence(next_goal)
-
-            # Takım Performans Analizi
-            if performance_analysis:
-                st.markdown("---")
-                st.header("Detaylı Performans Analizi")
-
-                tab1, tab2, tab3 = st.tabs(["Ev Sahibi Analizi", "Deplasman Analizi", "Oyuncu Analizi"])
-
-                with tab1:
-                    display_team_analysis(performance_analysis['home_team'], 'home')
-
-                with tab2:
-                    display_team_analysis(performance_analysis['away_team'], 'away')
-
-                with tab3:
-                    display_player_analysis(player_analysis)
-
-            # Display win probability chart
-            st.subheader("Canlı Kazanma Olasılıkları")
-            st.plotly_chart(create_probability_chart(
-                match_info['teams']['home']['name'],
-                match_info['teams']['away']['name'],
-                win_probs,
-                "Canlı Tahmin"
-            ), use_container_width=True)
-
-            # Display basic statistics
-            if stats:
-                st.subheader("Maç İstatistikleri")
-                col1, col2 = st.columns(2)
-
-                with col1:
-                    st.write(f"**{match_info['teams']['home']['name']}**")
-                    for stat in stats[0]['statistics']:
-                        if stat['value'] is not None:
-                            st.metric(
-                                label=stat['type'],
-                                value=stat['value'],
-                                delta=None
-                            )
-
-                with col2:
-                    st.write(f"**{match_info['teams']['away']['name']}**")
-                    for stat in stats[1]['statistics']:
-                        if stat['value'] is not None:
-                            st.metric(
-                                label=stat['type'],
-                                value=stat['value'],
-                                delta=None
-                            )
-
-            # Display match events
-            if events:
-                st.subheader("Önemli Olaylar")
-                for event in events:
-                    if event['type'] == 'Goal':
-                        st.success(format_event(event))
-                    elif event['type'] in ['Card', 'subst']:
-                        st.warning(format_event(event))
-                    else:
-                        st.info(format_event(event))
-
-    except Exception as e:
-        logger.error(f"Error displaying match details: {str(e)}")
-        st.error(f"Maç detayları gösterilirken bir hata oluştu: {str(e)}")
