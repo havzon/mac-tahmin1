@@ -1,7 +1,8 @@
+# En başta set_page_config - tüm importlardan önce olmalı
 import streamlit as st
-from notification_handler import NotificationHandler
-
 st.set_page_config(page_title="Bildirim Ayarları", layout="wide")
+
+from notification_handler import NotificationHandler
 
 st.title("Bildirim Ayarları")
 st.markdown("""
