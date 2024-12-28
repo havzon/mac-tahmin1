@@ -94,6 +94,21 @@ def display_match_details(fixture_id, match_info):
             commentary = st.session_state.commentator.generate_match_commentary(stats, score, events)
             st.markdown(f"💬 {commentary}")
 
+            # Next Goal Prediction
+            st.subheader("Gol Tahmini")
+            next_goal = st.session_state.commentator.predict_next_goal(stats, events)
+
+            # Display prediction with probability gauge
+            col1, col2 = st.columns(2)
+            with col1:
+                st.write("**Tahmin:**", next_goal['prediction'])
+                if next_goal['expected_time']:
+                    st.write("**Tahmini Zaman:**", f"{next_goal['expected_time']}. dakika")
+
+            with col2:
+                st.progress(next_goal['probability'], 
+                          text=f"Olasılık: {next_goal['probability']:.1%}")
+
             # Display prediction explanation
             prediction_explanation = st.session_state.commentator.explain_prediction(win_probs, stats)
             st.info(f"📊 **Tahmin Açıklaması:** {prediction_explanation}")
