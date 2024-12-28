@@ -7,7 +7,6 @@ from utils import (create_probability_chart, create_form_chart,
                   create_history_table, calculate_combined_prediction)
 from strategy_advisor import StrategyAdvisor
 from typing import Dict
-from player_analyzer import PlayerAnalyzer # Added import
 import plotly.graph_objects as go
 
 
@@ -144,74 +143,6 @@ if home_team and away_team and analyze_button:
         st.plotly_chart(create_probability_chart(
             home_team, away_team, final_pred, "Birleşik Model"
         ), use_container_width=True)
-
-
-        # Get player data  (ASSUMPTION:  data_handler needs to be updated to provide this)
-        home_players = st.session_state.data_handler.get_team_squad(home_team)
-        away_players = st.session_state.data_handler.get_team_squad(away_team)
-
-        # ASSUMPTION:  We need match_stats, events, and historical_data.  These will need to be obtained from the DataHandler or elsewhere.
-        match_stats = st.session_state.data_handler.get_match_stats(home_team, away_team) #example
-        events = st.session_state.data_handler.get_match_events(home_team, away_team) #example
-        historical_data = st.session_state.data_handler.get_historical_data(home_team, away_team) #example
-
-        # Get predictions with player performance (ASSUMPTION: StatisticalModel needs update)
-        prediction = st.session_state.statistical_model.predict_with_player_performance(
-            match_stats, events, home_players, away_players, historical_data
-        )
-
-        # Display player analysis
-        st.subheader("🏃 Oyuncu Performans Analizi")
-        col1, col2 = st.columns(2)
-
-        with col1:
-            st.markdown(f"**{home_team} Kilit Oyuncular**")
-            for player in prediction['player_analysis']['home_team']['key_players']:
-                performance = player['performance']
-                st.info(f"""
-                **{player['name']}** ({player['position']})
-                - Form: {PlayerAnalyzer().get_performance_summary(performance)}
-                - Skor Gücü: {performance['scoring_ability']:.2f}
-                - Pas Etkinliği: {performance['passing_efficiency']:.2f}
-                - Maç Etkisi: {performance['match_influence']:.2f}
-                """)
-
-        with col2:
-            st.markdown(f"**{away_team} Kilit Oyuncular**")
-            for player in prediction['player_analysis']['away_team']['key_players']:
-                performance = player['performance']
-                st.info(f"""
-                **{player['name']}** ({player['position']})
-                - Form: {PlayerAnalyzer().get_performance_summary(performance)}
-                - Skor Gücü: {performance['scoring_ability']:.2f}
-                - Pas Etkinliği: {performance['passing_efficiency']:.2f}
-                - Maç Etkisi: {performance['match_influence']:.2f}
-                """)
-
-        # Display team performance comparison
-        st.subheader("📊 Takım Performans Karşılaştırması")
-        team_metrics = {
-            home_team: prediction['player_analysis']['home_team']['overall_rating'],
-            away_team: prediction['player_analysis']['away_team']['overall_rating']
-        }
-
-        fig = go.Figure(data=[
-            go.Bar(
-                x=list(team_metrics.keys()),
-                y=list(team_metrics.values()),
-                text=[f"{v:.2%}" for v in team_metrics.values()],
-                textposition='auto',
-            )
-        ])
-
-        fig.update_layout(
-            title="Takım Performans Skorları",
-            yaxis_title="Performans Skoru",
-            yaxis=dict(range=[0, 1])
-        )
-
-        st.plotly_chart(fig, use_container_width=True)
-
 
         # Tahmin güvenilirlik analizi
         st.subheader("Tahmin Güvenilirlik Analizi")
@@ -365,7 +296,6 @@ if home_team and away_team and analyze_button:
             st.error(f"Form karşılaştırması yapılırken hata oluştu: {str(e)}")
             st.write("Detaylı hata bilgisi:", e)
 
-
         # Display historical matches
         st.subheader("Son Karşılaşmalar")
         st.markdown(create_history_table(df, home_team, away_team), unsafe_allow_html=True)
@@ -404,20 +334,6 @@ if home_team and away_team and analyze_button:
         with tab3:
             for tip in advice['general']:
                 st.success(tip)
-
-        # Kilit oyuncu rolleri
-        st.subheader("Önemli Oyuncu Rolleri")
-        col1, col2 = st.columns(2)
-
-        with col1:
-            st.write(f"**{home_team} için önemli roller:**")
-            for role in st.session_state.strategy_advisor.get_key_player_roles(home_team):
-                st.write(f"• {role}")
-
-        with col2:
-            st.write(f"**{away_team} için önemli roller:**")
-            for role in st.session_state.strategy_advisor.get_key_player_roles(away_team):
-                st.write(f"• {role}")
 
         # Maç tempo tahmini
         st.subheader("Maç Tempo Tahmini")
