@@ -2,7 +2,7 @@ import streamlit as st
 import pandas as pd
 import numpy as np
 from data_handler import DataHandler
-from models import PredictionModel, OddsBasedModel, StatisticalModel
+from models import StatisticalModel, OddsBasedModel
 from utils import (create_probability_chart, create_form_chart,
                   create_history_table, calculate_combined_prediction)
 from strategy_advisor import StrategyAdvisor
@@ -10,12 +10,10 @@ from strategy_advisor import StrategyAdvisor
 # Initialize session state
 if 'data_handler' not in st.session_state:
     st.session_state.data_handler = DataHandler("c417cb5967msh54c12f850f3798cp12a733jsn315fab53ee3c")
-    st.session_state.models_trained = False
 
 if 'models' not in st.session_state:
-    st.session_state.prediction_model = PredictionModel()
-    st.session_state.odds_model = OddsBasedModel()
     st.session_state.statistical_model = StatisticalModel()
+    st.session_state.odds_model = OddsBasedModel()
     st.session_state.strategy_advisor = None
 
 # Page config
@@ -25,9 +23,9 @@ st.set_page_config(page_title="Futbol Maç Tahmini", layout="wide")
 st.title("Futbol Maç Tahmin Sistemi")
 st.markdown("""
 Bu sistem çoklu analiz yöntemleri kullanarak futbol maç sonuçlarını tahmin eder:
-- Makine Öğrenmesi tabanlı tahmin
 - İstatistiksel Analiz
 - Bahis oranları bazlı hesaplama
+- Güvenilirlik Simülasyonu
 """)
 
 # Load data
@@ -109,40 +107,29 @@ analyze_button = st.button("Analizi Başlat", type="primary")
 # Make predictions when teams are selected and button is clicked
 if home_team and away_team and analyze_button:
     try:
-        # Train models if not already trained
-        if not st.session_state.models_trained:
-            with st.spinner("Tahmin modelleri eğitiliyor..."):
-                st.session_state.prediction_model.train(df)
-                st.session_state.models_trained = True
-
         # Get predictions from each model
-        features = st.session_state.prediction_model.prepare_features(df, home_team, away_team)
-        ml_pred = st.session_state.prediction_model.predict(features)
-
         stat_pred = st.session_state.statistical_model.calculate_probabilities(df, home_team, away_team)
 
         odds_pred = None
         if all([home_odds > 1.0, draw_odds > 1.0, away_odds > 1.0]):
             odds_pred = st.session_state.odds_model.calculate_probabilities(home_odds, draw_odds, away_odds)
 
-        # Calculate combined prediction
-        final_pred = calculate_combined_prediction(ml_pred, odds_pred, stat_pred)
+        # Calculate combined prediction (statistical and odds-based)
+        if odds_pred is not None:
+            final_pred = (stat_pred * 0.7 + odds_pred * 0.3)  # Give more weight to statistical model
+        else:
+            final_pred = stat_pred
 
         # Display predictions
         st.subheader("Maç Sonuç Tahmini")
-        col1, col2, col3 = st.columns(3)
+        col1, col2 = st.columns(2)
 
         with col1:
-            st.plotly_chart(create_probability_chart(
-                home_team, away_team, ml_pred, "Makine Öğrenmesi"
-            ), use_container_width=True)
-
-        with col2:
             st.plotly_chart(create_probability_chart(
                 home_team, away_team, stat_pred, "İstatistiksel"
             ), use_container_width=True)
 
-        with col3:
+        with col2:
             if odds_pred is not None:
                 st.plotly_chart(create_probability_chart(
                     home_team, away_team, odds_pred, "Oran Bazlı"
@@ -154,7 +141,7 @@ if home_team and away_team and analyze_button:
             home_team, away_team, final_pred, "Birleşik Model"
         ), use_container_width=True)
 
-        # Tahmin güvenilirliği analizi
+        # Tahmin güvenilirlik analizi
         st.subheader("Tahmin Güvenilirlik Analizi")
 
         reliability_analysis = st.session_state.strategy_advisor.analyze_prediction_reliability(
@@ -181,21 +168,20 @@ if home_team and away_team and analyze_button:
         # Genel tavsiye
         st.info(f"💡 **Tavsiye:** {reliability_analysis.get('recommendation', 'Analiz yapılamadı.')}")
 
-
         # Goal prediction
         st.subheader("Gol Tahmini")
-        goal_pred = st.session_state.prediction_model.predict_goals(features)
+        goal_pred = st.session_state.statistical_model.predict_goals(df, home_team, away_team)
         st.write(f"Tahmini gol sayısı: {goal_pred:.1f}")
 
         # Over/Under probabilities
-        over_under = st.session_state.prediction_model.predict_over_under(features)
+        over_under = st.session_state.statistical_model.predict_over_under(df, home_team, away_team)
         st.write(f"2.5 Üst olma olasılığı: {over_under[0]:.1%}")
         st.write(f"2.5 Alt olma olasılığı: {over_under[1]:.1%}")
 
         # Display team form comparison
         st.subheader("Takım Form Karşılaştırması")
-        home_form = st.session_state.prediction_model.get_team_form(df, home_team)
-        away_form = st.session_state.prediction_model.get_team_form(df, away_team)
+        home_form = st.session_state.strategy_advisor.get_team_form(df, home_team)
+        away_form = st.session_state.strategy_advisor.get_team_form(df, away_team)
 
         st.plotly_chart(create_form_chart(
             home_form,
