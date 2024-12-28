@@ -4,6 +4,7 @@ import logging
 from typing import Dict, List, Optional, Tuple
 from team_analyzer import TeamAnalyzer
 from sklearn.preprocessing import StandardScaler
+from player_analyzer import PlayerAnalyzer
 
 # Configure logging
 logging.basicConfig(level=logging.INFO)
@@ -15,6 +16,7 @@ class MLPredictor:
         logger.info("Initializing ML Predictor")
         self.model = None
         self.team_analyzer = TeamAnalyzer()
+        self.player_analyzer = PlayerAnalyzer()
         self.scaler = StandardScaler()
         self._initialize_model()
 
@@ -500,6 +502,7 @@ class MLPredictor:
             logger.error(f"Error selecting best prediction: {str(e)}")
             return 'düşük'  # Varsayılan olarak düşük güven
 
+
     def _adjust_prediction(self, base_prediction: float, match_state: Dict,
                          momentum_factors: Dict, confidence_level: str) -> float:
         """Tahmin ayarlama - güven seviyesine göre"""
@@ -730,8 +733,6 @@ class MLPredictor:
                 }.get(event['type'], 0.0)
 
 
-                # Form bazlı ağırlık ayarı  (removed because home_form and away_form are not passed)
-
                 if event['team']['id'] == match_stats[0]['team']['id']:
                     home_momentum += event_weight
                 else:
@@ -844,7 +845,7 @@ class MLPredictor:
             time_factors = {
                 'base_range': base_range,
                 'momentum_effect': momentum_effect,
-                'adjusted_range': (adjusted_min, adjusted_max),
+                ''adjusted_range': (adjusted_min, adjusted_max),
                 'current_time': current_time
             }
 
@@ -1146,3 +1147,185 @@ class MLPredictor:
         from sklearn.preprocessing import StandardScaler
         self.scaler = StandardScaler()
         return self.scaler
+
+    def predict_with_player_performance(self, match_stats: Dict, events: List[Dict],
+                                      home_players: List[Dict], away_players: List[Dict],
+                                      historical_data: Optional[Dict] = None) -> Dict:
+        """Oyuncu performanslarını dahil ederek tahmin yap"""
+        try:
+            # Ana tahmin
+            base_prediction = self.predict_goals(match_stats, events, historical_data)
+
+            # Oyuncu performans analizi
+            home_performance = self._analyze_team_players(home_players)
+            away_performance = self._analyze_team_players(away_players)
+
+            # Tahmin ayarlama
+            adjusted_prediction = self._adjust_prediction_with_players(
+                base_prediction,
+                home_performance,
+                away_performance
+            )
+
+            # Güvenilirlik analizi
+            confidence_level, confidence_factors = self._calculate_player_based_confidence(
+                home_performance, away_performance
+            )
+
+            return {
+                'prediction': adjusted_prediction,
+                'confidence_level': confidence_level,
+                'confidence_factors': confidence_factors,
+                'player_analysis': {
+                    'home_team': home_performance,
+                    'away_team': away_performance
+                }
+            }
+
+        except Exception as e:
+            logger.error(f"Error in player-based prediction: {str(e)}")
+            return base_prediction
+
+    def _analyze_team_players(self, players: List[Dict]) -> Dict:
+        """Takım oyuncularının performans analizi"""
+        try:
+            if not players:
+                return {'overall_rating': 0.0, 'key_players': []}
+
+            # Her oyuncunun performans analizi
+            player_performances = []
+            for player in players:
+                performance = self.player_analyzer.analyze_player_performance(player)
+                player_performances.append({
+                    'id': player.get('id'),
+                    'name': player.get('name'),
+                    'position': player.get('position'),
+                    'performance': performance
+                })
+
+            # Takım genel performans skoru
+            team_rating = np.mean([p['performance']['overall_rating'] 
+                                 for p in player_performances])
+
+            # Kilit oyuncular (en yüksek performanslı 3 oyuncu)
+            key_players = sorted(
+                player_performances,
+                key=lambda x: x['performance']['overall_rating'],
+                reverse=True
+            )[:3]
+
+            return {
+                'overall_rating': float(team_rating),
+                'key_players': key_players,
+                'all_players': player_performances
+            }
+
+        except Exception as e:
+            logger.error(f"Error analyzing team players: {str(e)}")
+            return {'overall_rating': 0.0, 'key_players': []}
+
+    def _adjust_prediction_with_players(self, base_prediction: Dict,
+                                      home_performance: Dict,
+                                      away_performance: Dict) -> Dict:
+        """Oyuncu performanslarına göre tahmini ayarla"""
+        try:
+            prediction = base_prediction.copy()
+
+            # Performans farkı
+            performance_diff = (home_performance['overall_rating'] - 
+                             away_performance['overall_rating'])
+
+            # Tahmin ayarlama faktörleri
+            for key in ['prediction', 'confidence_level']:
+                if isinstance(prediction[key], (int, float)):
+                    adjustment = performance_diff * 0.1  # %10 etki
+                    prediction[key] = max(0, min(1, prediction[key] + adjustment))
+
+            # Kilit oyuncu etkisi
+            home_key_impact = self._calculate_key_player_impact(
+                home_performance['key_players']
+            )
+            away_key_impact = self._calculate_key_player_impact(
+                away_performance['key_players']
+            )
+
+            key_player_adjustment = (home_key_impact - away_key_impact) * 0.05
+            prediction['prediction'] = max(0, min(1, 
+                prediction['prediction'] + key_player_adjustment
+            ))
+
+            return prediction
+
+        except Exception as e:
+            logger.error(f"Error adjusting prediction with players: {str(e)}")
+            return base_prediction
+
+    def _calculate_key_player_impact(self, key_players: List[Dict]) -> float:
+        """Kilit oyuncuların etkisini hesapla"""
+        try:
+            if not key_players:
+                return 0.0
+
+            # Oyuncuların form ve önem ağırlığı
+            weights = [0.5, 0.3, 0.2]  # İlk 3 oyuncu için ağırlıklar
+            impact = 0.0
+
+            for player, weight in zip(key_players, weights):
+                perf = player['performance']
+                impact += perf['overall_rating'] * weight
+
+            return impact
+
+        except Exception as e:
+            logger.error(f"Error calculating key player impact: {str(e)}")
+            return 0.0
+
+    def _calculate_player_based_confidence(self, home_performance: Dict,
+                                         away_performance: Dict) -> Tuple[str, Dict]:
+        """Oyuncu bazlı güvenilirlik analizi"""
+        try:
+            factors = {}
+
+            # Veri kalitesi
+            home_data_quality = len(home_performance.get('all_players', [])) / 11
+            away_data_quality = len(away_performance.get('all_players', [])) / 11
+            data_quality = (home_data_quality + away_data_quality) / 2
+
+            # Performans tutarlılığı
+            performance_consistency = 1 - abs(
+                home_performance['overall_rating'] - away_performance['overall_rating']
+            )
+
+            # Kilit oyuncu verisi
+            key_player_coverage = (
+                len(home_performance.get('key_players', [])) +
+                len(away_performance.get('key_players', []))
+            ) / 6  # İdeal durumda 6 kilit oyuncu (her takımdan 3)
+
+            # Toplam güven skoru
+            confidence_score = (
+                data_quality * 0.4 +
+                performance_consistency * 0.3 +
+                key_player_coverage * 0.3
+            )
+
+            # Güven seviyesi
+            if confidence_score > 0.7:
+                confidence_level = 'yüksek'
+            elif confidence_score > 0.4:
+                confidence_level = 'orta'
+            else:
+                confidence_level = 'düşük'
+
+            factors.update({
+                'data_quality': data_quality,
+                'performance_consistency': performance_consistency,
+                'key_player_coverage': key_player_coverage,
+                'total_score': confidence_score
+            })
+
+            return confidence_level, factors
+
+        except Exception as e:
+            logger.error(f"Error calculating player-based confidence: {str(e)}")
+            return 'düşük', {'error': str(e)}
