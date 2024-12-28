@@ -98,12 +98,14 @@ def display_match_details(fixture_id, match_info):
             st.subheader("Gol Tahmini")
             next_goal = st.session_state.commentator.predict_next_goal(stats, events)
 
-            # Display prediction with probability gauge
+            # Display prediction with probability gauge and confidence
             col1, col2 = st.columns(2)
             with col1:
                 st.write("**Tahmin:**", next_goal['prediction'])
                 if next_goal['expected_time']:
                     st.write("**Tahmini Zaman:**", f"{next_goal['expected_time']}. dakika")
+                if 'confidence' in next_goal:
+                    st.write("**Güven Seviyesi:**", next_goal['confidence'].title())
 
             with col2:
                 st.progress(next_goal['probability'], 

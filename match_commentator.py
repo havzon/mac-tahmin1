@@ -53,7 +53,7 @@ class MatchCommentator:
         # Son olayların analizi
         if events:
             recent_events = events[-3:]  # Son 3 olay
-            for event in recent_events:
+            for event in events[-3:]:
                 if event['type'] == 'Goal':
                     commentary.append(f"⚽ {event['time']['elapsed']}. dakikada {event['team']['name']} golü buldu!")
                 elif event['type'] == 'Card':
@@ -79,20 +79,39 @@ class MatchCommentator:
         home_possession = float(home_stats[9]['value'].strip('%')) if home_stats[9]['value'] else 50
         home_attacks = int(home_stats[13]['value'] or 0)
         away_attacks = int(away_stats[13]['value'] or 0)
+        home_corners = int(home_stats[6]['value'] or 0)
+        away_corners = int(away_stats[6]['value'] or 0)
 
-        # Momentum hesapla
+        # Gelişmiş momentum hesaplama
         home_momentum = (
-            home_shots * 0.3 +
-            (home_possession / 100) * 0.3 +
-            (home_attacks / max(home_attacks + away_attacks, 1)) * 0.4
+            home_shots * 0.25 +  # İsabetli şutlar
+            (home_possession / 100) * 0.2 +  # Top kontrolü
+            (home_attacks / max(home_attacks + away_attacks, 1)) * 0.3 +  # Tehlikeli ataklar
+            (home_corners / max(home_corners + away_corners, 1)) * 0.15 +  # Korner etkinliği
+            self._calculate_recent_momentum(events, 'home') * 0.1  # Son dakika momentumu
         )
 
         away_momentum = (
-            away_shots * 0.3 +
-            ((100 - home_possession) / 100) * 0.3 +
-            (away_attacks / max(home_attacks + away_attacks, 1)) * 0.4
+            away_shots * 0.25 +
+            ((100 - home_possession) / 100) * 0.2 +
+            (away_attacks / max(home_attacks + away_attacks, 1)) * 0.3 +
+            (away_corners / max(home_corners + away_corners, 1)) * 0.15 +
+            self._calculate_recent_momentum(events, 'away') * 0.1
         )
 
+        # Skor etkisi
+        if events:
+            last_goal = next((event for event in reversed(events) if event['type'] == 'Goal'), None)
+            if last_goal:
+                team_scored_last = 'home' if last_goal['team']['name'] == match_stats[0]['team']['name'] else 'away'
+                if team_scored_last == 'home':
+                    home_momentum *= 1.1  # Son golü atan takıma bonus
+                    away_momentum *= 1.15  # Yenik takıma hafif bonus
+                else:
+                    away_momentum *= 1.1
+                    home_momentum *= 1.15
+
+        # Olasılık normalizasyonu
         total_momentum = home_momentum + away_momentum
         if total_momentum == 0:
             home_prob = away_prob = 0.5
@@ -100,42 +119,92 @@ class MatchCommentator:
             home_prob = home_momentum / total_momentum
             away_prob = away_momentum / total_momentum
 
-        # Son gol zamanını bul
-        last_goal_time = 0
-        if events:
-            for event in reversed(events):
-                if event['type'] == 'Goal':
-                    last_goal_time = event['time']['elapsed']
-                    break
+        # Tahmini gol zamanı hesaplama
+        expected_time = self._predict_next_goal_time(events)
 
-        # Tahmini gol zamanı (son golden sonra 15-30 dk arası)
-        expected_time = last_goal_time + np.random.randint(15, 30)
-        expected_time = min(expected_time, 90)
-
-        # Hangi takımın gol atma olasılığı daha yüksek
-        if home_prob > away_prob and home_prob > 0.6:
+        # Tahmin sonucu
+        if home_prob > away_prob and home_prob > 0.55:
             return {
                 'prediction': 'Ev sahibi takım gol atabilir',
                 'probability': home_prob,
-                'expected_time': expected_time
+                'expected_time': expected_time,
+                'confidence': self._calculate_prediction_confidence(home_prob, match_stats)
             }
-        elif away_prob > home_prob and away_prob > 0.6:
+        elif away_prob > home_prob and away_prob > 0.55:
             return {
                 'prediction': 'Deplasman takımı gol atabilir',
                 'probability': away_prob,
-                'expected_time': expected_time
+                'expected_time': expected_time,
+                'confidence': self._calculate_prediction_confidence(away_prob, match_stats)
             }
         else:
             return {
                 'prediction': 'Şu an için gol beklentisi düşük',
                 'probability': max(home_prob, away_prob),
-                'expected_time': None
+                'expected_time': None,
+                'confidence': 'düşük'
             }
+
+    def _calculate_recent_momentum(self, events: List[Dict], team: str) -> float:
+        """Son dakikalardaki momentum hesaplama"""
+        if not events:
+            return 0.0
+
+        momentum = 0.0
+        recent_events = events[-5:]  # Son 5 olay
+        for event in recent_events:
+            event_team = 'home' if event['team']['name'] == events[0]['team']['home'] else 'away'
+            if event_team == team:
+                if event['type'] == 'Goal':
+                    momentum += 0.3
+                elif event['type'] == 'Card':
+                    momentum -= 0.1
+                elif event['type'] in ['subst', 'Var']:
+                    momentum += 0.05
+
+        return min(1.0, max(0.0, momentum))
+
+    def _predict_next_goal_time(self, events: List[Dict]) -> Optional[int]:
+        """Sonraki golün tahmini zamanını hesapla"""
+        if not events:
+            return None
+
+        # Son golün zamanını bul
+        last_goal_time = 0
+        goal_intervals = []
+        prev_goal_time = 0
+
+        for event in events:
+            if event['type'] == 'Goal':
+                current_time = event['time']['elapsed']
+                if prev_goal_time > 0:
+                    goal_intervals.append(current_time - prev_goal_time)
+                prev_goal_time = current_time
+                last_goal_time = current_time
+
+        # Ortalama gol aralığını hesapla
+        if goal_intervals:
+            avg_interval = sum(goal_intervals) / len(goal_intervals)
+            # Tahmini zamanı hesapla ve normalize et
+            predicted_time = last_goal_time + max(10, min(30, avg_interval))
+            return min(90, int(predicted_time))
+        else:
+            # Hiç gol yoksa, maçın durumuna göre tahmin yap
+            current_time = events[-1]['time']['elapsed']
+            return min(90, current_time + np.random.randint(15, 25))
+
+    def _calculate_prediction_confidence(self, probability: float, match_stats: Dict) -> str:
+        """Tahmin güven seviyesini hesapla"""
+        if probability > 0.7:
+            return 'yüksek'
+        elif probability > 0.6:
+            return 'orta'
+        else:
+            return 'düşük'
 
     def explain_prediction(self, win_probs: List[float], match_stats: Dict) -> str:
         """Tahmin olasılıklarını açıkla"""
         home_prob, draw_prob, away_prob = win_probs
-
         explanation = []
 
         # En yüksek olasılığı bul
@@ -153,7 +222,7 @@ class MatchCommentator:
         else:
             explanation.append("Beraberlik ihtimali yüksek, dengeli bir maç bekleniyor.")
 
-        # İstatistiklere dayalı açıklama
+        # İstatistik bazlı açıklama
         if match_stats:
             home_stats = match_stats[0]['statistics']
             away_stats = match_stats[1]['statistics']
@@ -161,7 +230,6 @@ class MatchCommentator:
             # Tehlikeli atakları karşılaştır
             home_attacks = int(home_stats[13]['value'] or 0)
             away_attacks = int(away_stats[13]['value'] or 0)
-
             if abs(home_attacks - away_attacks) > 5:
                 if home_attacks > away_attacks:
                     explanation.append(f"Ev sahibi takım {home_attacks} tehlikeli atakla baskı kuruyor.")
@@ -171,7 +239,6 @@ class MatchCommentator:
             # Şut isabetini karşılaştır
             home_shots = int(home_stats[2]['value'] or 0)
             away_shots = int(away_stats[2]['value'] or 0)
-
             if abs(home_shots - away_shots) > 2:
                 if home_shots > away_shots:
                     explanation.append("Ev sahibi isabetli şutlarda daha etkili.")
