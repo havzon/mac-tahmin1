@@ -78,12 +78,10 @@ def display_prediction_with_confidence(prediction: Dict):
                 st.markdown(f"- {bet_type.replace('_', ' ').title()}: **{odd}**")
 
         with odds_col2:
-            if 'quality_factors' in prediction['predictions'][prediction['confidence']]:
-                quality = prediction['predictions'][prediction['confidence']]['quality_factors']
-                if 'betting_confidence' in quality:
-                    st.markdown("**Bahis Güven Faktörü**")
-                    st.progress(quality['betting_confidence'], 
-                              text=f"Güven: {quality['betting_confidence']:.1%}")
+            if 'implied_probabilities' in prediction:
+                st.markdown("**İma Edilen Olasılıklar**")
+                for bet_type, prob in prediction['implied_probabilities'].items():
+                    st.markdown(f"- {bet_type.replace('_', ' ').title()}: **{prob:.1%}**")
 
     # Tüm güven seviyelerindeki tahminler
     if 'predictions' in prediction:
@@ -109,7 +107,9 @@ def display_prediction_with_confidence(prediction: Dict):
                         st.markdown("**Tahmin Detayları**")
                         st.markdown(f"Olasılık: **{pred['probability']:.1%}**")
                         if 'reason' in pred:
-                            st.markdown(f"Tahmin Nedeni: *{pred['reason'].replace('_', ' ').title()}*")
+                            st.markdown(f"**Tahmin Nedenleri:**")
+                            for reason in pred['reason'].split(" & "):
+                                st.markdown(f"- *{reason}*")
 
                     with col2:
                         if 'probability' in pred:
@@ -135,8 +135,23 @@ def display_prediction_with_confidence(prediction: Dict):
                     # Kalite faktörleri
                     if 'quality_factors' in pred:
                         st.markdown("**Kalite Faktörleri**")
+                        quality_factors_data = []
                         for factor, value in pred['quality_factors'].items():
-                            st.progress(value, text=f"{factor.replace('_', ' ').title()}: {value:.1%}")
+                            quality_factors_data.append({
+                                'Factor': factor.replace('_', ' ').title(),
+                                'Value': value * 100
+                            })
+
+                        if quality_factors_data:
+                            import plotly.express as px
+                            fig = px.bar(quality_factors_data,
+                                       x='Factor',
+                                       y='Value',
+                                       text=[f'{v:.1f}%' for v in [d['Value'] for d in quality_factors_data]],
+                                       title="Tahmin Kalite Faktörleri",
+                                       height=300)
+                            fig.update_layout(yaxis_range=[0, 100])
+                            st.plotly_chart(fig, use_container_width=True)
                 else:
                     st.warning(f"Bu güven seviyesinde tahmin bulunmuyor.")
 
@@ -160,28 +175,6 @@ def display_prediction_with_confidence(prediction: Dict):
             if 'total' in prediction['momentum']:
                 st.progress(min(1.0, prediction['momentum']['total']), 
                           text=f"Toplam Momentum: {min(1.0, prediction['momentum']['total']):.1%}")
-
-        # Momentum grafiği
-        if all(k in prediction['momentum'] for k in ['home', 'away']):
-            import plotly.express as px
-            momentum_data = {
-                'Takım': ['Ev Sahibi', 'Deplasman'],
-                'Momentum': [
-                    prediction['momentum']['home'],
-                    prediction['momentum']['away']
-                ]
-            }
-            fig = px.bar(momentum_data, 
-                        x='Takım', 
-                        y='Momentum',
-                        color='Takım',
-                        text=[f'{v:.1%}' for v in momentum_data['Momentum']])
-            fig.update_layout(
-                title='Takım Momentumları',
-                showlegend=False,
-                height=250
-            )
-            st.plotly_chart(fig, use_container_width=True)
 
 def display_player_analysis(player_stats: Dict):
     """Oyuncu analiz sonuçlarını göster"""

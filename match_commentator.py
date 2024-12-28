@@ -123,17 +123,42 @@ class MatchCommentator:
                     for confidence_level in predictions['predictions']:
                         pred = predictions['predictions'][confidence_level]
 
-                        # Oranları tahminle birleştir (0.7 tahmin, 0.3 bahis oranı ağırlığı)
+                        # Bahis oranı bazlı güncelleme
                         if 'probability' in pred:
+                            # Bahis oranı ağırlığını güven seviyesine göre ayarla
+                            if confidence_level == 'yüksek':
+                                betting_weight = 0.4
+                            elif confidence_level == 'orta':
+                                betting_weight = 0.3
+                            else:
+                                betting_weight = 0.2
+
+                            ml_weight = 1 - betting_weight
                             pred['probability'] = (
-                                pred['probability'] * 0.7 + 
-                                implied_probs.get('next_goal', 0.5) * 0.3
+                                pred['probability'] * ml_weight + 
+                                implied_probs.get('next_goal', 0.5) * betting_weight
                             )
 
-                        # Kalite faktörlerine bahis oranı güvenini ekle
+                        # Kalite faktörlerini güncelle
                         if 'quality_factors' not in pred:
                             pred['quality_factors'] = {}
-                        pred['quality_factors']['betting_confidence'] = min(1.0, max(0.3, 1/total_prob))
+
+                        pred['quality_factors'].update({
+                            'betting_confidence': min(1.0, max(0.3, 1/total_prob)),
+                            'odds_consistency': min(1.0, max(0.2, 1 - abs(pred['probability'] - implied_probs.get('next_goal', 0.5)))),
+                            'market_strength': min(1.0, len(betting_odds) / 10)  # Bahis pazarı güçlülüğü
+                        })
+
+                        # Tahmin nedenini güncelle
+                        reasons = []
+                        if pred['probability'] > 0.6:
+                            reasons.append("Yüksek olasılıklı gol beklentisi")
+                        if pred['quality_factors']['betting_confidence'] > 0.7:
+                            reasons.append("Güçlü bahis market göstergeleri")
+                        if pred['quality_factors']['odds_consistency'] > 0.8:
+                            reasons.append("Tutarlı tahmin ve oran verileri")
+
+                        pred['reason'] = " & ".join(reasons) if reasons else "Standart analiz"
 
                 except Exception as e:
                     logger.error(f"Error processing betting odds: {str(e)}")
@@ -173,29 +198,22 @@ class MatchCommentator:
                 prediction += f" ({momentum['trend'].replace('_', ' ').title()})"
 
             # Bahis oranları varsa ekle
+            prediction_data = {
+                'prediction': prediction,
+                'probability': probability,
+                'expected_time': selected_prediction.get('expected_time'),
+                'confidence': confidence,
+                'reason': reason,
+                'match_state': match_state,
+                'momentum': momentum,
+                'predictions': predictions['predictions']
+            }
+
             if betting_odds:
-                prediction_data = {
-                    'prediction': prediction,
-                    'probability': probability,
-                    'expected_time': selected_prediction.get('expected_time'),
-                    'confidence': confidence,
-                    'reason': reason,
-                    'match_state': match_state,
-                    'momentum': momentum,
+                prediction_data.update({
                     'betting_odds': betting_odds,
-                    'predictions': predictions['predictions']
-                }
-            else:
-                prediction_data = {
-                    'prediction': prediction,
-                    'probability': probability,
-                    'expected_time': selected_prediction.get('expected_time'),
-                    'confidence': confidence,
-                    'reason': reason,
-                    'match_state': match_state,
-                    'momentum': momentum,
-                    'predictions': predictions['predictions']
-                }
+                    'implied_probabilities': implied_probs
+                })
 
             return prediction_data
 
