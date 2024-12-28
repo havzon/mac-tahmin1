@@ -37,8 +37,18 @@ class StatisticalModel:
                                       away_players: List[Dict], 
                                       historical_data: Dict) -> Dict:
         """Oyuncu performanslarını dahil ederek tahmin yap"""
+        # Varsayılan tahmin değerleri
+        default_probs = np.array([0.33, 0.34, 0.33])  # Eşit olasılıklar
+
         try:
             # Temel olasılıkları hesapla
+            if not match_stats or len(match_stats) < 2:
+                return {
+                    'probabilities': default_probs.tolist(),
+                    'player_analysis': {'home_team': {}, 'away_team': {}},
+                    'form_analysis': {'home_team': {}, 'away_team': {}}
+                }
+
             base_probs = self.calculate_probabilities(
                 historical_data.get('data', pd.DataFrame()),
                 match_stats[0]['team']['name'],
@@ -96,7 +106,7 @@ class StatisticalModel:
         except Exception as e:
             print(f"Error in predict_with_player_performance: {str(e)}")
             return {
-                'probabilities': base_probs.tolist(),
+                'probabilities': default_probs.tolist(),
                 'player_analysis': {'home_team': {}, 'away_team': {}},
                 'form_analysis': {'home_team': {}, 'away_team': {}}
             }
