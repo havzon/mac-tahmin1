@@ -182,14 +182,13 @@ class MatchCommentator:
         """Tüm tahmin kaynaklarını birleştir"""
         try:
             predictions = {'predictions': {}}
-            confidence_levels = ['yüksek', 'düşük']  # Orta seviye kaldırıldı
+            confidence_levels = ['yüksek', 'düşük']
 
             for level in confidence_levels:
                 pred_data = {}
 
                 # ML tahmin ağırlığı
                 ml_weight = 0.6 if level == 'yüksek' else 0.4
-
                 # Kural bazlı tahmin ağırlığı
                 rule_weight = 0.4 if level == 'yüksek' else 0.6
 
@@ -204,57 +203,47 @@ class MatchCommentator:
                     market_prob = odds_analysis['implied_probabilities'].get('next_goal', 0.5)
                     final_prob = base_prob * 0.8 + market_prob * 0.2
 
-                    # Kalite faktörleri
-                    pred_data['quality_factors'] = {
-                        'Model Güvenilirliği': ml_pred.get('confidence_score', 0.5),
-                        'Kural Tabanlı Analiz': rule_pred.get('confidence', 0.5),
-                        'Bahis Market Güveni': odds_analysis['market_quality']['confidence'],
-                        'Tahmin Tutarlılığı': min(1.0, max(0.2, 1 - abs(base_prob - market_prob)))
-                    }
+                    # Tahmin nedenleri
+                    reasons = []
+                    if final_prob > 0.6:
+                        reasons.append("Yüksek olasılıklı gol beklentisi")
+                    if odds_analysis['market_quality']['confidence'] > 0.7:
+                        reasons.append("Güçlü bahis market göstergeleri")
+
+                    pred_data.update({
+                        'probability': final_prob,
+                        'reason': " & ".join(reasons) if reasons else "Standart analiz",
+                        'odds_comparison': {
+                            'market_odds': betting_odds,
+                            'implied_probabilities': odds_analysis['implied_probabilities'],
+                            'market_confidence': odds_analysis['market_quality']['confidence']
+                        }
+                    })
                 else:
-                    final_prob = base_prob
-                    pred_data['quality_factors'] = {
-                        'Model Güvenilirliği': ml_pred.get('confidence_score', 0.5),
-                        'Kural Tabanlı Analiz': rule_pred.get('confidence', 0.5)
-                    }
-
-                # Tahmin nedenleri
-                reasons = []
-                if final_prob > 0.6:
-                    reasons.append("Yüksek olasılıklı gol beklentisi")
-                if odds_analysis and odds_analysis['market_quality']['confidence'] > 0.7:
-                    reasons.append("Güçlü bahis market göstergeleri")
-                if pred_data['quality_factors'].get('Tahmin Tutarlılığı', 0) > 0.8:
-                    reasons.append("Tutarlı tahmin ve oran verileri")
-                if ml_pred.get('confidence_score', 0) > 0.7:
-                    reasons.append("Güçlü ML model tahmini")
-
-                pred_data.update({
-                    'probability': final_prob,
-                    'reason': " & ".join(reasons) if reasons else "Standart analiz"
-                })
+                    pred_data.update({
+                        'probability': base_prob,
+                        'reason': "Model ve kural bazlı tahmin"
+                    })
 
                 predictions['predictions'][level] = pred_data
 
             # En yüksek güvenli tahmini seç
             recommended = max(predictions['predictions'].items(),
-                            key=lambda x: x[1]['probability'] * 
-                                        sum(x[1]['quality_factors'].values()) / len(x[1]['quality_factors']))
+                            key=lambda x: x[1]['probability'])
 
             result = {
                 'prediction': self._generate_prediction_text(recommended[1]['probability']),
                 'probability': recommended[1]['probability'],
                 'confidence': recommended[0],
                 'reason': recommended[1]['reason'],
-                'predictions': predictions['predictions'],
-                'performance_metrics': self._calculate_performance_metrics(ml_pred, rule_pred, odds_analysis)
+                'predictions': predictions['predictions']
             }
 
             # Bahis oranları varsa ekle
             if betting_odds:
                 result.update({
                     'betting_odds': betting_odds,
-                    'implied_probabilities': odds_analysis['implied_probabilities']
+                    'odds_analysis': odds_analysis
                 })
 
             return result
@@ -265,66 +254,6 @@ class MatchCommentator:
                 'prediction': 'Tahmin hesaplanamadı',
                 'probability': 0.0,
                 'confidence': 'düşük'
-            }
-
-    def _calculate_performance_metrics(self, ml_pred: Dict, rule_pred: Dict, odds_analysis: Optional[Dict]) -> Dict:
-        """Tahmin performans metriklerini hesapla ve optimize et"""
-        try:
-            metrics = {
-                'model_accuracy': ml_pred.get('accuracy', 0.0),
-                'rule_accuracy': rule_pred.get('confidence', 0.0),
-                'combined_confidence': 0.0,
-                'optimization_suggestions': []
-            }
-
-            # Model performans analizi
-            if ml_pred.get('accuracy', 0.0) < 0.6:
-                metrics['optimization_suggestions'].append({
-                    'component': 'ML Model',
-                    'action': 'Yeni veri ile modeli güncelle',
-                    'priority': 'Yüksek'
-                })
-
-            # Kural tabanlı sistem analizi
-            if rule_pred.get('confidence', 0.0) < 0.5:
-                metrics['optimization_suggestions'].append({
-                    'component': 'Kural Sistemi',
-                    'action': 'Kural ağırlıklarını optimize et',
-                    'priority': 'Orta'
-                })
-
-            # Bahis market entegrasyonu analizi
-            if odds_analysis:
-                market_confidence = odds_analysis['market_quality']['confidence']
-                if market_confidence < 0.6:
-                    metrics['optimization_suggestions'].append({
-                        'component': 'Bahis Entegrasyonu',
-                        'action': 'Market derinliği analizi gerekli',
-                        'priority': 'Düşük'
-                    })
-
-            # Birleşik güven skoru hesaplama
-            confidence_weights = {
-                'ml_model': 0.4,
-                'rule_based': 0.3,
-                'market': 0.3
-            }
-
-            metrics['combined_confidence'] = (
-                ml_pred.get('accuracy', 0.0) * confidence_weights['ml_model'] +
-                rule_pred.get('confidence', 0.0) * confidence_weights['rule_based'] +
-                (odds_analysis['market_quality']['confidence'] if odds_analysis else 0.5) * confidence_weights['market']
-            )
-
-            return metrics
-
-        except Exception as e:
-            logger.error(f"Error calculating performance metrics: {str(e)}")
-            return {
-                'model_accuracy': 0.0,
-                'rule_accuracy': 0.0,
-                'combined_confidence': 0.0,
-                'optimization_suggestions': []
             }
 
     def _generate_prediction_text(self, probability: float) -> str:

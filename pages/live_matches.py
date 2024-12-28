@@ -7,7 +7,7 @@ from models import StatisticalModel
 from utils import create_probability_chart, create_form_chart
 from strategy_advisor import StrategyAdvisor
 from match_commentator import MatchCommentator
-from performance_analyzer import PerformanceAnalyzer
+#from performance_analyzer import PerformanceAnalyzer #Removed as per intention
 
 # Configure logging
 logging.basicConfig(level=logging.INFO)
@@ -23,7 +23,7 @@ if 'data_handler' not in st.session_state:
             st.session_state.data_handler = DataHandler(api_key)
             st.session_state.statistical_model = StatisticalModel()
             st.session_state.strategy_advisor = StrategyAdvisor(None)
-            st.session_state.performance_analyzer = PerformanceAnalyzer()
+            #st.session_state.performance_analyzer = PerformanceAnalyzer() #Removed as per intention
             logger.info("All components initialized successfully")
         else:
             logger.error("API key not found in secrets")
@@ -65,110 +65,78 @@ def display_prediction_with_confidence(prediction: Dict):
     with col2:
         st.progress(prediction['probability'], text=f"Olasılık: {prediction['probability']:.1%}")
 
-    # Performans metrikleri
-    if 'performance_metrics' in prediction:
-        st.markdown("### Model Performans Analizi")
-        metrics = prediction['performance_metrics']
+    # Bahis oranları analizi
+    if 'betting_odds' in prediction and 'odds_analysis' in prediction:
+        st.markdown("### Bahis Oranları Analizi")
 
+        # Market kalitesi göstergesi
+        market_quality = prediction['odds_analysis']['market_quality']
+        st.metric(
+            "Market Güven Skoru",
+            f"{market_quality['confidence']:.1%}",
+            delta=f"{(market_quality['efficiency'] - 0.5) * 100:.1f}%",
+            delta_color="normal"
+        )
+
+        # Bahis oranları karşılaştırma
         col1, col2 = st.columns(2)
         with col1:
-            st.metric("Model Doğruluğu", f"{metrics['model_accuracy']:.1%}")
-            st.metric("Kural Sistemi Doğruluğu", f"{metrics['rule_accuracy']:.1%}")
+            st.markdown("#### Canlı Bahis Oranları")
+            for bet_type, odds in prediction['betting_odds'].items():
+                if bet_type in ['home', 'draw', 'away']:
+                    category = "Maç Sonucu"
+                elif bet_type in ['over25', 'under25', 'btts']:
+                    category = "Gol Bahisleri"
+                else:
+                    category = "Diğer"
+
+                st.metric(
+                    f"{category} - {bet_type.replace('_', ' ').title()}", 
+                    f"{odds:.2f}",
+                    delta=f"{(1/float(odds) * 100):.1f}%",
+                    delta_color="off"
+                )
 
         with col2:
-            st.metric("Birleşik Güven Skoru", f"{metrics['combined_confidence']:.1%}")
+            st.markdown("#### İma Edilen Olasılıklar")
+            for bet_type, prob in prediction['odds_analysis']['implied_probabilities'].items():
+                st.metric(
+                    bet_type.replace('_', ' ').title(),
+                    f"{prob:.1%}",
+                    delta=None
+                )
 
-        if metrics['optimization_suggestions']:
-            st.markdown("#### Optimizasyon Önerileri")
-            for suggestion in metrics['optimization_suggestions']:
-                if suggestion['priority'] == 'Yüksek':
-                    st.error(f"🔴 {suggestion['component']}: {suggestion['action']}")
-                elif suggestion['priority'] == 'Orta':
-                    st.warning(f"🟡 {suggestion['component']}: {suggestion['action']}")
-                else:
-                    st.info(f"🔵 {suggestion['component']}: {suggestion['action']}")
+        # Bahis pazarı trend analizi
+        if 'odds_by_type' in prediction['odds_analysis']:
+            st.markdown("#### Bahis Pazarı Trend Analizi")
+            odds_by_type = prediction['odds_analysis']['odds_by_type']
 
-    # Bahis oranları gösterimi
-    if 'betting_odds' in prediction:
-        st.markdown("### Bahis Oranları Analizi")
-        odds_col1, odds_col2 = st.columns(2)
-
-        with odds_col1:
-            st.markdown("**Canlı Bahis Oranları**")
-            for bet_type, odd in prediction['betting_odds'].items():
-                st.markdown(f"- {bet_type.replace('_', ' ').title()}: **{odd}**")
-
-        with odds_col2:
-            if 'implied_probabilities' in prediction:
-                st.markdown("**İma Edilen Olasılıklar**")
-                for bet_type, prob in prediction['implied_probabilities'].items():
-                    st.markdown(f"- {bet_type.replace('_', ' ').title()}: **{prob:.1%}**")
+            for category, odds in odds_by_type.items():
+                if odds:  # Eğer kategori boş değilse
+                    with st.expander(f"{category.replace('_', ' ').title()} Detayları"):
+                        for bet_type, odd in odds.items():
+                            implied_prob = 1/float(odd)
+                            st.metric(
+                                bet_type.replace('_', ' ').title(),
+                                f"{odd:.2f}",
+                                delta=f"{implied_prob:.1%}",
+                                delta_color="off"
+                            )
 
     # Tahmin detayları
     if 'predictions' in prediction:
         st.markdown("### Tahmin Detayları")
         tabs = st.tabs(["Yüksek Güven", "Düşük Güven"])
-        confidence_colors = {
-            'yüksek': '#2ecc71',  # Yeşil
-            'düşük': '#e74c3c'    # Kırmızı
-        }
 
-        for tab, (level, color) in zip(tabs, confidence_colors.items()):
+        for tab, level in zip(tabs, ['yüksek', 'düşük']):
             with tab:
                 if level in prediction['predictions']:
                     pred = prediction['predictions'][level]
-                    st.markdown(f"### {level.title()} Güvenli Tahmin")
-
-                    # Tahmin detayları
-                    col1, col2 = st.columns(2)
-                    with col1:
-                        st.markdown("**Tahmin Detayları**")
-                        st.markdown(f"Olasılık: **{pred['probability']:.1%}**")
-                        if 'reason' in pred:
-                            st.markdown("**Tahmin Nedenleri:**")
-                            for reason in pred['reason'].split(" & "):
-                                st.markdown(f"- *{reason}*")
-
-                    with col2:
-                        if 'probability' in pred:
-                            import plotly.graph_objects as go
-                            fig = go.Figure(go.Indicator(
-                                mode = "gauge+number",
-                                value = pred['probability'] * 100,
-                                domain = {'x': [0, 1], 'y': [0, 1]},
-                                title = {'text': f"{level.title()} Güven"},
-                                gauge = {
-                                    'axis': {'range': [0, 100]},
-                                    'bar': {'color': color},
-                                    'steps': [
-                                        {'range': [0, 50], 'color': 'lightgray'},
-                                        {'range': [50, 100], 'color': 'darkgray'}
-                                    ]
-                                }
-                            ))
-                            fig.update_layout(height=250)
-                            st.plotly_chart(fig, use_container_width=True, key=f"gauge_{level}")
-
-                    # Kalite faktörleri
-                    if 'quality_factors' in pred:
-                        st.markdown("**Kalite Faktörleri**")
-                        quality_factors_data = []
-                        for factor, value in pred['quality_factors'].items():
-                            quality_factors_data.append({
-                                'Faktör': factor,
-                                'Değer': value * 100
-                            })
-
-                        if quality_factors_data:
-                            import plotly.express as px
-                            fig = px.bar(quality_factors_data,
-                                       x='Faktör',
-                                       y='Değer',
-                                       text=[f'{v:.1f}%' for v in [d['Değer'] for d in quality_factors_data]],
-                                       title="Tahmin Kalite Faktörleri",
-                                       height=300)
-                            fig.update_layout(yaxis_range=[0, 100])
-                            st.plotly_chart(fig, use_container_width=True, key=f"quality_factors_{level}")
+                    st.markdown(f"**Olasılık:** {pred['probability']:.1%}")
+                    if 'reason' in pred:
+                        st.markdown("**Tahmin Nedenleri:**")
+                        for reason in pred['reason'].split(" & "):
+                            st.markdown(f"- *{reason}*")
                 else:
                     st.warning(f"Bu güven seviyesinde tahmin bulunmuyor.")
 
@@ -240,34 +208,6 @@ def display_match_details(fixture_id, match_info):
             )
             st.plotly_chart(win_prob_chart, use_container_width=True, key=f"win_prob_{fixture_id}")
 
-            # Takım Performans Analizi
-            try:
-                if hasattr(st.session_state, 'performance_analyzer'):
-                    performance_analysis = st.session_state.performance_analyzer.analyze_team_performance(stats, events)
-                    player_analysis = st.session_state.performance_analyzer.analyze_player_performance(events)
-                else:
-                    logger.error("Performance analyzer not initialized")
-                    performance_analysis = None
-                    player_analysis = None
-            except Exception as e:
-                logger.error(f"Error in performance analysis: {str(e)}")
-                performance_analysis = None
-                player_analysis = None
-
-            if performance_analysis:
-                st.markdown("---")
-                st.header("Detaylı Performans Analizi")
-
-                tab1, tab2, tab3 = st.tabs(["Ev Sahibi Analizi", "Deplasman Analizi", "Oyuncu Analizi"])
-
-                with tab1:
-                    display_team_analysis(performance_analysis['home_team'], 'home')
-
-                with tab2:
-                    display_team_analysis(performance_analysis['away_team'], 'away')
-
-                with tab3:
-                    display_player_analysis(player_analysis)
 
             # Display basic statistics
             if stats:
