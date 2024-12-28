@@ -8,8 +8,8 @@ import streamlit as st
 
 class PredictionModel:
     def __init__(self):
-        self.rf_model = RandomForestClassifier(n_estimators=50, random_state=42, n_jobs=-1)  # Reduced trees, parallel processing
-        self.xgb_model = xgb.XGBClassifier(random_state=42, n_jobs=-1)  # Parallel processing
+        self.rf_model = RandomForestClassifier(n_estimators=50, random_state=42, n_jobs=-1)
+        self.xgb_model = xgb.XGBClassifier(random_state=42, n_jobs=-1)
         self.scaler = StandardScaler()
 
     def prepare_features(self, df, team1, team2):
@@ -39,43 +39,69 @@ class PredictionModel:
         return np.array(features).reshape(1, -1)
 
     def _calculate_form(self, matches, team):
+        if len(matches) == 0:
+            return 0.0
+
         wins = 0
         for _, match in matches.iterrows():
             if match['HomeTeam'] == team and match['FTR'] == 'H':
                 wins += 1
             elif match['AwayTeam'] == team and match['FTR'] == 'A':
                 wins += 1
-        return wins / 5.0 if len(matches) > 0 else 0.0
+        return wins / len(matches)
 
     def _calculate_goals_scored(self, df, team):
-        home_goals = df[df['HomeTeam'] == team]['FTHG'].mean()
-        away_goals = df[df['AwayTeam'] == team]['FTAG'].mean()
-        return (home_goals + away_goals) / 2 if not np.isnan(home_goals + away_goals) else 0.0
+        recent_matches = df[(df['HomeTeam'] == team) | (df['AwayTeam'] == team)].tail(10)
+        if len(recent_matches) == 0:
+            return 0.0
+
+        home_goals = recent_matches[recent_matches['HomeTeam'] == team]['FTHG'].mean()
+        away_goals = recent_matches[recent_matches['AwayTeam'] == team]['FTAG'].mean()
+
+        if np.isnan(home_goals):
+            home_goals = 0
+        if np.isnan(away_goals):
+            away_goals = 0
+
+        return (home_goals + away_goals) / 2
 
     def _calculate_goals_conceded(self, df, team):
-        home_conceded = df[df['HomeTeam'] == team]['FTAG'].mean()
-        away_conceded = df[df['AwayTeam'] == team]['FTHG'].mean()
-        return (home_conceded + away_conceded) / 2 if not np.isnan(home_conceded + away_conceded) else 0.0
+        recent_matches = df[(df['HomeTeam'] == team) | (df['AwayTeam'] == team)].tail(10)
+        if len(recent_matches) == 0:
+            return 0.0
+
+        home_conceded = recent_matches[recent_matches['HomeTeam'] == team]['FTAG'].mean()
+        away_conceded = recent_matches[recent_matches['AwayTeam'] == team]['FTHG'].mean()
+
+        if np.isnan(home_conceded):
+            home_conceded = 0
+        if np.isnan(away_conceded):
+            away_conceded = 0
+
+        return (home_conceded + away_conceded) / 2
 
     def train(self, df):
-        """Train both models on historical data"""
+        """Train both models on historical data using recent matches"""
+        # Use only the most recent 1000 matches for training
+        recent_df = df.tail(1000)
+
         X = []
         y = []
 
         # Show progress bar
-        total_rows = len(df) - 5
+        total_rows = len(recent_df) - 5
         progress_bar = st.progress(0)
         status_text = st.empty()
 
-        for i in range(len(df)-5):
+        for i in range(len(recent_df)-5):
             # Update progress
             progress = (i + 1) / total_rows
             progress_bar.progress(progress)
-            status_text.text(f"Processing matches: {i+1}/{total_rows}")
+            status_text.text(f"İşlenen maç: {i+1}/{total_rows}")
 
-            match = df.iloc[i]
+            match = recent_df.iloc[i]
             try:
-                features = self.prepare_features(df.iloc[:i], match['HomeTeam'], match['AwayTeam'])
+                features = self.prepare_features(recent_df.iloc[:i], match['HomeTeam'], match['AwayTeam'])
                 X.append(features[0])
 
                 # Convert result to numeric
@@ -87,31 +113,30 @@ class PredictionModel:
                     result = 2
                 y.append(result)
             except Exception as e:
-                st.warning(f"Skipping match due to data issue: {e}")
                 continue
 
         X = np.array(X)
         y = np.array(y)
 
         # Scale features
-        status_text.text("Scaling features...")
+        status_text.text("Özellikler ölçeklendiriliyor...")
         X = self.scaler.fit_transform(X)
 
         # Split data
         X_train, X_test, y_train, y_test = train_test_split(X, y, test_size=0.2, random_state=42)
 
         # Train models
-        status_text.text("Training Random Forest model...")
+        status_text.text("Random Forest modeli eğitiliyor...")
         self.rf_model.fit(X_train, y_train)
 
-        status_text.text("Training XGBoost model...")
+        status_text.text("XGBoost modeli eğitiliyor...")
         self.xgb_model.fit(X_train, y_train)
 
         # Clean up progress indicators
         progress_bar.empty()
         status_text.empty()
 
-        st.success("Model training completed!")
+        st.success("Model eğitimi tamamlandı!")
 
     def predict(self, features):
         """Make predictions using both models"""
