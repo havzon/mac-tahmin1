@@ -44,6 +44,11 @@ def load_data():
         for col in odds_columns:
             df[col] = pd.to_numeric(df[col], errors='coerce')
 
+        # Fill NaN values with 0 for numeric columns
+        numeric_columns = df.select_dtypes(include=[np.number]).columns
+        df[numeric_columns] = df[numeric_columns].fillna(0)
+
+        st.session_state.df_loaded = True
         return df
     except Exception as e:
         st.error(f"Error loading data: {str(e)}")
@@ -53,6 +58,9 @@ try:
     df = load_data()
     if df is not None:
         teams = sorted(df['HomeTeam'].unique())
+        st.success("Data loaded successfully!")
+        st.write(f"Total matches in dataset: {len(df)}")
+        st.write(f"Number of unique teams: {len(teams)}")
     else:
         st.error("Could not load the dataset. Please check if the file exists and is accessible.")
         st.stop()
@@ -152,6 +160,7 @@ if home_team and away_team:
 
     except Exception as e:
         st.error(f"Error making predictions: {str(e)}")
+        st.write("Detailed error information:", e)
 
 # Footer
 st.markdown("---")
