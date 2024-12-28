@@ -4,6 +4,7 @@ from data_handler import DataHandler
 from models import StatisticalModel
 from utils import create_probability_chart, create_form_chart
 from strategy_advisor import StrategyAdvisor
+from match_commentator import MatchCommentator
 
 st.set_page_config(page_title="Canlı Maçlar", layout="wide")
 
@@ -15,6 +16,7 @@ if 'data_handler' not in st.session_state:
             st.session_state.data_handler = DataHandler(api_key)
             st.session_state.statistical_model = StatisticalModel()
             st.session_state.strategy_advisor = StrategyAdvisor(None)  # Will be updated with data
+            st.session_state.commentator = MatchCommentator()  # Initialize commentator
         else:
             st.error("API anahtarı bulunamadı. Lütfen RAPIDAPI_KEY'i Secrets kısmına ekleyin.")
             st.stop()
@@ -71,12 +73,18 @@ def display_match_details(fixture_id, match_info):
     with st.spinner("Maç detayları yükleniyor..."):
         # Get match statistics
         stats = st.session_state.data_handler.get_match_statistics(fixture_id)
+        events = st.session_state.data_handler.get_match_events(fixture_id)
 
         # Score information
         score = [match_info['goals']['home'], match_info['goals']['away']]
 
         # Calculate live win probabilities
         win_probs = calculate_live_win_probability(stats, score)
+
+        # AI Commentary Section
+        st.subheader("Maç Yorumu")
+        commentary = st.session_state.commentator.generate_match_commentary(stats, score, events)
+        st.markdown(f"💬 {commentary}")
 
         # Display win probability chart
         st.subheader("Canlı Kazanma Olasılıkları")
@@ -86,6 +94,10 @@ def display_match_details(fixture_id, match_info):
             win_probs,
             "Canlı Tahmin"
         ), use_container_width=True)
+
+        # Display prediction explanation
+        prediction_explanation = st.session_state.commentator.explain_prediction(win_probs, stats)
+        st.info(f"📊 **Tahmin Açıklaması:** {prediction_explanation}")
 
         if stats:
             st.subheader("Maç İstatistikleri")
@@ -137,10 +149,8 @@ def display_match_details(fixture_id, match_info):
                 st.progress(home_possession / 100,
                           text=f"Top Kontrolü: %{home_possession:.1f}")
 
-        # Get match events
-        events = st.session_state.data_handler.get_match_events(fixture_id)
         if events:
-            st.subheader("Maç Olayları")
+            st.subheader("Önemli Olaylar")
             for event in events:
                 if event['type'] == 'Goal':
                     st.success(format_event(event))
@@ -148,26 +158,6 @@ def display_match_details(fixture_id, match_info):
                     st.warning(format_event(event))
                 else:
                     st.info(format_event(event))
-
-        # Get match lineups
-        lineups = st.session_state.data_handler.get_match_lineups(fixture_id)
-        if lineups:
-            st.subheader("Kadrolar")
-            col1, col2 = st.columns(2)
-
-            with col1:
-                st.write("**Ev Sahibi Kadro**")
-                st.write(f"Diziliş: {lineups[0]['formation']}")
-                st.write("İlk 11:")
-                for player in lineups[0]['startXI']:
-                    st.write(f"• {player['player']['name']}")
-
-            with col2:
-                st.write("**Deplasman Kadro**")
-                st.write(f"Diziliş: {lineups[1]['formation']}")
-                st.write("İlk 11:")
-                for player in lineups[1]['startXI']:
-                    st.write(f"• {player['player']['name']}")
 
 st.title("Canlı Maçlar")
 
