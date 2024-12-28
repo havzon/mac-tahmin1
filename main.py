@@ -66,6 +66,7 @@ try:
         st.stop()
 except Exception as e:
     st.error(f"Error processing data: {str(e)}")
+    st.write("Detailed error information:", e)
     st.stop()
 
 # Team selection
