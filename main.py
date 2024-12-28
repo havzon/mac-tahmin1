@@ -6,6 +6,7 @@ from models import StatisticalModel, OddsBasedModel
 from utils import (create_probability_chart, create_form_chart,
                   create_history_table, calculate_combined_prediction)
 from strategy_advisor import StrategyAdvisor
+from typing import Dict
 
 # Initialize session state
 if 'data_handler' not in st.session_state:
@@ -193,6 +194,7 @@ if home_team and away_team and analyze_button:
                 st.metric("Mağlubiyet", home_form['losses'])
                 st.metric("Form Skoru", f"{home_form['form_score']:.2%}")
                 st.metric("Seri", home_form['current_streak'])
+                st.metric("Rakip Güç Ortalaması", f"{home_form['average_opponent_strength']:.2f}")
 
             with col2:
                 st.markdown(f"**{away_team} Son Form**")
@@ -201,11 +203,93 @@ if home_team and away_team and analyze_button:
                 st.metric("Mağlubiyet", away_form['losses'])
                 st.metric("Form Skoru", f"{away_form['form_score']:.2%}")
                 st.metric("Seri", away_form['current_streak'])
+                st.metric("Rakip Güç Ortalaması", f"{away_form['average_opponent_strength']:.2f}")
 
             # Form karşılaştırma grafiği
             st.markdown("### Form Trendi")
+            import plotly.graph_objects as go
+
+            def create_form_chart(home_form: Dict, away_form: Dict, home_team: str, away_team: str):
+                """Form karşılaştırma grafiği oluştur"""
+                categories = ['Galibiyet', 'Beraberlik', 'Mağlubiyet', 'Gol Ortalaması', 'Form Skoru']
+
+                home_values = [
+                    home_form['wins'],
+                    home_form['draws'],
+                    home_form['losses'],
+                    home_form['avg_goals_scored'],
+                    home_form['form_score']
+                ]
+
+                away_values = [
+                    away_form['wins'],
+                    away_form['draws'],
+                    away_form['losses'],
+                    away_form['avg_goals_scored'],
+                    away_form['form_score']
+                ]
+
+                fig = go.Figure()
+
+                fig.add_trace(go.Scatterpolar(
+                    r=home_values,
+                    theta=categories,
+                    fill='toself',
+                    name=home_team
+                ))
+
+                fig.add_trace(go.Scatterpolar(
+                    r=away_values,
+                    theta=categories,
+                    fill='toself',
+                    name=away_team
+                ))
+
+                fig.update_layout(
+                    polar=dict(
+                        radialaxis=dict(
+                            visible=True,
+                            range=[0, max(max(home_values), max(away_values)) * 1.2]
+                        )),
+                    showlegend=True,
+                    title="Form Karşılaştırması"
+                )
+
+                return fig
+
             fig = create_form_chart(home_form, away_form, home_team, away_team)
             st.plotly_chart(fig, use_container_width=True)
+
+            # Bahis önerisi
+            st.markdown("### 💰 Bahis Önerisi")
+            betting_advice = st.session_state.strategy_advisor.generate_betting_advice(home_form, away_form)
+
+            # Güven skoru göstergesi
+            st.progress(betting_advice['confidence_score'],
+                       text=f"Güven Skoru: {betting_advice['confidence_score']:.1%}")
+
+            # Öneriler
+            if betting_advice['recommendations']:
+                col1, col2 = st.columns(2)
+                with col1:
+                    st.markdown("**Önerilen Bahisler:**")
+                    for rec in betting_advice['recommendations']:
+                        if betting_advice['confidence_score'] > 0.7:
+                            st.success(f"✅ {rec}")
+                        else:
+                            st.info(f"ℹ️ {rec}")
+
+                with col2:
+                    st.markdown("**Gerekçeler:**")
+                    for exp in betting_advice['explanations']:
+                        st.write(f"• {exp}")
+
+                if betting_advice['confidence_score'] > 0.8:
+                    st.success("🎯 Yüksek güvenilirlikli tahmin")
+                elif betting_advice['confidence_score'] > 0.6:
+                    st.info("📊 Orta güvenilirlikli tahmin")
+                else:
+                    st.warning("⚠️ Düşük güvenilirlikli tahmin")
 
         except Exception as e:
             st.error(f"Form karşılaştırması yapılırken hata oluştu: {str(e)}")

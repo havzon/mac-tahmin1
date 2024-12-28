@@ -6,7 +6,6 @@ import logging
 logger = logging.getLogger(__name__)
 logging.basicConfig(level=logging.ERROR)
 
-
 class StrategyAdvisor:
     def __init__(self, historical_data: pd.DataFrame):
         self.data = historical_data
@@ -28,47 +27,81 @@ class StrategyAdvisor:
                 'goals_conceded': [],
                 'points': [],
                 'form_trend': [],
-                'last_matches': []
+                'last_matches': [],
+                'opponent_strengths': []  # Rakip güçlerini tutmak için
             }
+
+            # Tüm takımların son 10 maçtaki puan ortalamasını hesapla
+            all_teams = pd.concat([data['HomeTeam'], data['AwayTeam']]).unique()
+            team_strengths = {}
+
+            for t in all_teams:
+                team_matches_10 = data[(data['HomeTeam'] == t) | (data['AwayTeam'] == t)].tail(10)
+                points = []
+                for _, match in team_matches_10.iterrows():
+                    is_home = match['HomeTeam'] == t
+                    team_goals = match['FTHG'] if is_home else match['FTAG']
+                    opponent_goals = match['FTAG'] if is_home else match['FTHG']
+
+                    if team_goals > opponent_goals:
+                        points.append(3)
+                    elif team_goals == opponent_goals:
+                        points.append(1)
+                    else:
+                        points.append(0)
+
+                team_strengths[t] = np.mean(points) if points else 1.5
 
             # Son maçları analiz et
             for _, match in team_matches.iterrows():
                 is_home = match['HomeTeam'] == team
                 team_goals = match['FTHG'] if is_home else match['FTAG']
                 opponent_goals = match['FTAG'] if is_home else match['FTHG']
+                opponent = match['AwayTeam'] if is_home else match['HomeTeam']
+
+                # Rakip gücünü kaydet
+                opponent_strength = team_strengths.get(opponent, 1.5)
+                form_data['opponent_strengths'].append(opponent_strength)
 
                 # Gol istatistikleri
                 form_data['goals_scored'].append(float(team_goals))
                 form_data['goals_conceded'].append(float(opponent_goals))
 
-                # Maç sonucu
+                # Maç sonucu (rakip gücüne göre ağırlıklandırılmış)
                 if team_goals > opponent_goals:
                     form_data['wins'] += 1
-                    form_data['points'].append(3)
-                    form_data['form_trend'].append(1)  # Galibiyet
+                    form_data['points'].append(3 * opponent_strength)
+                    form_data['form_trend'].append(1)
                 elif team_goals == opponent_goals:
                     form_data['draws'] += 1
-                    form_data['points'].append(1)
-                    form_data['form_trend'].append(0)  # Beraberlik
+                    form_data['points'].append(1 * opponent_strength)
+                    form_data['form_trend'].append(0)
                 else:
                     form_data['losses'] += 1
                     form_data['points'].append(0)
-                    form_data['form_trend'].append(-1)  # Mağlubiyet
+                    form_data['form_trend'].append(-1)
 
                 # Maç detayı
                 form_data['last_matches'].append({
-                    'opponent': match['AwayTeam'] if is_home else match['HomeTeam'],
+                    'opponent': opponent,
+                    'opponent_strength': opponent_strength,
                     'score': f"{team_goals}-{opponent_goals}",
                     'home_away': 'H' if is_home else 'A'
                 })
 
             # Form metrikleri hesapla
+            weighted_form_score = self._calculate_weighted_form_score(
+                form_data['form_trend'],
+                form_data['opponent_strengths']
+            )
+
             form_data.update({
                 'avg_goals_scored': np.mean(form_data['goals_scored']),
                 'avg_goals_conceded': np.mean(form_data['goals_conceded']),
                 'total_points': sum(form_data['points']),
-                'form_score': self._calculate_form_score(form_data['form_trend']),
-                'current_streak': self._calculate_streak(form_data['form_trend'])
+                'form_score': weighted_form_score,
+                'current_streak': self._calculate_streak(form_data['form_trend']),
+                'average_opponent_strength': np.mean(form_data['opponent_strengths'])
             })
 
             return form_data
@@ -77,37 +110,77 @@ class StrategyAdvisor:
             logger.error(f"Error calculating team form: {str(e)}")
             return self._create_empty_form()
 
-    def _create_empty_form(self) -> Dict:
-        """Boş form verisi oluştur"""
-        return {
-            'wins': 0,
-            'draws': 0,
-            'losses': 0,
-            'goals_scored': [],
-            'goals_conceded': [],
-            'points': [],
-            'form_trend': [],
-            'last_matches': [],
-            'avg_goals_scored': 0,
-            'avg_goals_conceded': 0,
-            'total_points': 0,
-            'form_score': 0,
-            'current_streak': 'N/A'
-        }
+    def generate_betting_advice(self, home_team_form: Dict, away_team_form: Dict) -> Dict:
+        """Bahis tavsiyesi oluştur"""
+        try:
+            # Form skorlarını ve rakip güçlerini analiz et
+            home_weighted_score = home_team_form['form_score'] * (1 + 0.1)  # Ev sahibi avantajı
+            away_weighted_score = away_team_form['form_score']
 
-    def _calculate_form_score(self, trends: List[int]) -> float:
-        """Form skorunu hesapla (0-1 arası)"""
-        if not trends:
+            # Gol istatistiklerini analiz et
+            home_attack = home_team_form['avg_goals_scored'] / (away_team_form['avg_goals_conceded'] + 0.1)
+            away_attack = away_team_form['avg_goals_scored'] / (home_team_form['avg_goals_conceded'] + 0.1)
+
+            # Rakip güç farklarını hesapla
+            opponent_strength_diff = home_team_form['average_opponent_strength'] - away_team_form['average_opponent_strength']
+
+            # Güven skorunu hesapla
+            confidence_score = min(0.95, max(0.5, 0.7 + abs(home_weighted_score - away_weighted_score)))
+
+            # Bahis önerilerini oluştur
+            recommendations = []
+            explanations = []
+
+            if home_weighted_score > away_weighted_score * 1.2:
+                recommendations.append("1")
+                explanations.append("Ev sahibi formda ve güçlü rakiplere karşı başarılı")
+            elif away_weighted_score > home_weighted_score * 1.2:
+                recommendations.append("2")
+                explanations.append("Deplasman takımı üstün formda")
+            else:
+                recommendations.append("X")
+                explanations.append("Takımlar benzer form düzeyinde")
+
+            if home_attack + away_attack > 2.5:
+                recommendations.append("Üst 2.5")
+                explanations.append("İki takım da gol yollarında etkili")
+            elif home_attack + away_attack < 1.5:
+                recommendations.append("Alt 2.5")
+                explanations.append("Düşük gollü bir maç bekleniyor")
+
+            return {
+                'recommendations': recommendations,
+                'confidence_score': confidence_score,
+                'explanations': explanations,
+                'form_analysis': {
+                    'home_weighted_score': home_weighted_score,
+                    'away_weighted_score': away_weighted_score,
+                    'opponent_strength_diff': opponent_strength_diff
+                }
+            }
+
+        except Exception as e:
+            logger.error(f"Error generating betting advice: {str(e)}")
+            return {
+                'recommendations': [],
+                'confidence_score': 0.5,
+                'explanations': ["Yeterli veri yok"],
+                'form_analysis': {}
+            }
+
+    def _calculate_weighted_form_score(self, trends: List[int], opponent_strengths: List[float]) -> float:
+        """Rakip güçlerini hesaba katarak form skorunu hesapla"""
+        if not trends or not opponent_strengths:
             return 0.0
 
         # Son maçlara daha fazla ağırlık ver
-        weights = np.array([0.1, 0.15, 0.2, 0.25, 0.3])[:len(trends)]
-        weights = weights / weights.sum()  # Normalize
+        time_weights = np.array([0.1, 0.15, 0.2, 0.25, 0.3])[:len(trends)]
+        time_weights = time_weights / time_weights.sum()
 
-        # Trend değerlerini 0-1 aralığına dönüştür
-        normalized_trends = [(x + 1) / 2 for x in trends]  # -1->0, 0->0.5, 1->1
+        # Trend değerlerini normalize et ve rakip gücüyle ağırlıklandır
+        normalized_trends = [(x + 1) / 2 * strength for x, strength in zip(trends, opponent_strengths)]
 
-        return float(np.sum(weights * normalized_trends))
+        return float(np.sum(time_weights * normalized_trends))
 
     def _calculate_streak(self, trends: List[int]) -> str:
         """Mevcut galibiyet/mağlubiyet serisini hesapla"""
@@ -126,6 +199,27 @@ class StrategyAdvisor:
         streak_type = 'G' if current == 1 else 'M' if current == -1 else 'B'
         return f"{streak}{streak_type}"
 
+    def _create_empty_form(self) -> Dict:
+        """Boş form verisi oluştur"""
+        return {
+            'wins': 0,
+            'draws': 0,
+            'losses': 0,
+            'goals_scored': [],
+            'goals_conceded': [],
+            'points': [],
+            'form_trend': [],
+            'last_matches': [],
+            'opponent_strengths': [],
+            'avg_goals_scored': 0,
+            'avg_goals_conceded': 0,
+            'total_points': 0,
+            'form_score': 0,
+            'current_streak': 'N/A',
+            'average_opponent_strength': 0
+        }
+    
+    #Rest of the original code remains here.
     def analyze_team_style(self, team: str) -> Dict[str, float]:
         """Takımın oyun stilini analiz et"""
         team_matches = self.data[(self.data['HomeTeam'] == team) | (self.data['AwayTeam'] == team)].tail(10)

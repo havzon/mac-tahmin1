@@ -1,0 +1,30 @@
+Form Trendi
+Form karşılaştırması yapılırken hata oluştu: Invalid value of type 'builtins.dict' received for the 'r' property of scatterpolar Received value: {'wins': 0, 'draws': 1, 'losses': 4, 'goals_scored': [0.0, 1.0, 1.0, 1.0, 1.0], 'goals_conceded': [3.0, 2.0, 2.0, 1.0, 2.0], 'points': [0, 0, 0, 1, 0], 'form_trend': [-1, -1, -1, 0, -1], 'last_matches': [{'opponent': 'Roma', 'score': '0.0-3.0', 'home_away': 'A'}, {'opponent': 'Napoli', 'score': '1.0-2.0', 'home_away': 'A'}, {'opponent': 'Lazio', 'score': '1.0-2.0', 'home_away': 'H'}, {'opponent': 'Genoa', 'score': '1.0-1.0', 'home_away': 'A'}, {'opponent': 'Udinese', 'score': '1.0-2.0', 'home_away': 'H'}], 'avg_goals_scored': np.float64(0.8), 'avg_goals_conceded': np.float64(2.0), 'total_points': 1, 'form_score': 0.125, 'current_streak': '1M'}
+
+The 'r' property is an array that may be specified as a tuple,
+list, numpy array, or pandas Series
+
+Detaylı hata bilgisi:
+
+ValueError: Invalid value of type 'builtins.dict' received for the 'r' property of scatterpolar Received value: {'wins': 0, 'draws': 1, 'losses': 4, 'goals_scored': [0.0, 1.0, 1.0, 1.0, 1.0], 'goals_conceded': [3.0, 2.0, 2.0, 1.0, 2.0], 'points': [0, 0, 0, 1, 0], 'form_trend': [-1, -1, -1, 0, -1], 'last_matches': [{'opponent': 'Roma', 'score': '0.0-3.0', 'home_away': 'A'}, {'opponent': 'Napoli', 'score': '1.0-2.0', 'home_away': 'A'}, {'opponent': 'Lazio', 'score': '1.0-2.0', 'home_away': 'H'}, {'opponent': 'Genoa', 'score': '1.0-1.0', 'home_away': 'A'}, {'opponent': 'Udinese', 'score': '1.0-2.0', 'home_away': 'H'}], 'avg_goals_scored': np.float64(0.8), 'avg_goals_conceded': np.float64(2.0), 'total_points': 1, 'form_score': 0.125, 'current_streak': '1M'} The 'r' property is an array that may be specified as a tuple, list, numpy array, or pandas Series
+Traceback:
+File "/home/runner/FootballPredictorPro/main.py", line 207, in <module>
+    fig = create_form_chart(home_form, away_form, home_team, away_team)
+          ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+File "/home/runner/FootballPredictorPro/utils.py", line 35, in create_form_chart
+    fig.add_trace(go.Scatterpolar(
+                  ^^^^^^^^^^^^^^^^
+File "/home/runner/FootballPredictorPro/.pythonlibs/lib/python3.11/site-packages/plotly/graph_objs/_scatterpolar.py", line 2470, in __init__
+    self["r"] = _v
+    ~~~~^^^^^
+File "/home/runner/FootballPredictorPro/.pythonlibs/lib/python3.11/site-packages/plotly/basedatatypes.py", line 4868, in __setitem__
+    self._set_prop(prop, value)
+File "/home/runner/FootballPredictorPro/.pythonlibs/lib/python3.11/site-packages/plotly/basedatatypes.py", line 5212, in _set_prop
+    raise err
+File "/home/runner/FootballPredictorPro/.pythonlibs/lib/python3.11/site-packages/plotly/basedatatypes.py", line 5207, in _set_prop
+    val = validator.validate_coerce(val)
+          ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+File "/home/runner/FootballPredictorPro/.pythonlibs/lib/python3.11/site-packages/_plotly_utils/basevalidators.py", line 412, in validate_coerce
+    self.raise_invalid_val(v)
+File "/home/runner/FootballPredictorPro/.pythonlibs/lib/python3.11/site-packages/_plotly_utils/basevalidators.py", line 296, in raise_invalid_val
+    raise ValueError(
