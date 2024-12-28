@@ -56,7 +56,7 @@ def display_prediction_with_confidence(prediction: Dict):
 
     st.subheader("Gol Tahmini Analizi")
 
-    # Ana tahmin (en yüksek güvenli tahmin)
+    # Ana tahmin
     col1, col2 = st.columns(2)
     with col1:
         st.write("**Önerilen Tahmin:**", prediction['prediction'])
@@ -64,6 +64,29 @@ def display_prediction_with_confidence(prediction: Dict):
 
     with col2:
         st.progress(prediction['probability'], text=f"Olasılık: {prediction['probability']:.1%}")
+
+    # Performans metrikleri
+    if 'performance_metrics' in prediction:
+        st.markdown("### Model Performans Analizi")
+        metrics = prediction['performance_metrics']
+
+        col1, col2 = st.columns(2)
+        with col1:
+            st.metric("Model Doğruluğu", f"{metrics['model_accuracy']:.1%}")
+            st.metric("Kural Sistemi Doğruluğu", f"{metrics['rule_accuracy']:.1%}")
+
+        with col2:
+            st.metric("Birleşik Güven Skoru", f"{metrics['combined_confidence']:.1%}")
+
+        if metrics['optimization_suggestions']:
+            st.markdown("#### Optimizasyon Önerileri")
+            for suggestion in metrics['optimization_suggestions']:
+                if suggestion['priority'] == 'Yüksek':
+                    st.error(f"🔴 {suggestion['component']}: {suggestion['action']}")
+                elif suggestion['priority'] == 'Orta':
+                    st.warning(f"🟡 {suggestion['component']}: {suggestion['action']}")
+                else:
+                    st.info(f"🔵 {suggestion['component']}: {suggestion['action']}")
 
     # Bahis oranları gösterimi
     if 'betting_odds' in prediction:
@@ -81,15 +104,12 @@ def display_prediction_with_confidence(prediction: Dict):
                 for bet_type, prob in prediction['implied_probabilities'].items():
                     st.markdown(f"- {bet_type.replace('_', ' ').title()}: **{prob:.1%}**")
 
-    # Tüm güven seviyelerindeki tahminler
+    # Tahmin detayları
     if 'predictions' in prediction:
-        st.markdown("### Farklı Güven Seviyeli Tahminler")
-
-        # Güven seviyeleri için sekmeler
-        tabs = st.tabs(["Yüksek Güven", "Orta Güven", "Düşük Güven"])
+        st.markdown("### Tahmin Detayları")
+        tabs = st.tabs(["Yüksek Güven", "Düşük Güven"])
         confidence_colors = {
             'yüksek': '#2ecc71',  # Yeşil
-            'orta': '#f1c40f',    # Sarı
             'düşük': '#e74c3c'    # Kırmızı
         }
 
@@ -105,7 +125,7 @@ def display_prediction_with_confidence(prediction: Dict):
                         st.markdown("**Tahmin Detayları**")
                         st.markdown(f"Olasılık: **{pred['probability']:.1%}**")
                         if 'reason' in pred:
-                            st.markdown(f"**Tahmin Nedenleri:**")
+                            st.markdown("**Tahmin Nedenleri:**")
                             for reason in pred['reason'].split(" & "):
                                 st.markdown(f"- *{reason}*")
 
@@ -121,9 +141,8 @@ def display_prediction_with_confidence(prediction: Dict):
                                     'axis': {'range': [0, 100]},
                                     'bar': {'color': color},
                                     'steps': [
-                                        {'range': [0, 33], 'color': 'lightgray'},
-                                        {'range': [33, 66], 'color': 'gray'},
-                                        {'range': [66, 100], 'color': 'darkgray'}
+                                        {'range': [0, 50], 'color': 'lightgray'},
+                                        {'range': [50, 100], 'color': 'darkgray'}
                                     ]
                                 }
                             ))
@@ -136,16 +155,16 @@ def display_prediction_with_confidence(prediction: Dict):
                         quality_factors_data = []
                         for factor, value in pred['quality_factors'].items():
                             quality_factors_data.append({
-                                'Factor': factor.replace('_', ' ').title(),
-                                'Value': value * 100
+                                'Faktör': factor,
+                                'Değer': value * 100
                             })
 
                         if quality_factors_data:
                             import plotly.express as px
                             fig = px.bar(quality_factors_data,
-                                       x='Factor',
-                                       y='Value',
-                                       text=[f'{v:.1f}%' for v in [d['Value'] for d in quality_factors_data]],
+                                       x='Faktör',
+                                       y='Değer',
+                                       text=[f'{v:.1f}%' for v in [d['Değer'] for d in quality_factors_data]],
                                        title="Tahmin Kalite Faktörleri",
                                        height=300)
                             fig.update_layout(yaxis_range=[0, 100])
@@ -153,26 +172,6 @@ def display_prediction_with_confidence(prediction: Dict):
                 else:
                     st.warning(f"Bu güven seviyesinde tahmin bulunmuyor.")
 
-    # Maç durumu ve momentum bilgileri
-    if 'momentum' in prediction and 'match_state' in prediction:
-        st.markdown("### Maç ve Momentum Analizi")
-        col1, col2 = st.columns(2)
-
-        with col1:
-            st.markdown("**Maç Durumu**")
-            if 'phase' in prediction['match_state']:
-                st.markdown(f"**Faz:** {prediction['match_state']['phase'].replace('_', ' ').title()}")
-            if 'intensity' in prediction['match_state']:
-                st.progress(prediction['match_state']['intensity'], 
-                          text=f"Maç Yoğunluğu: {prediction['match_state']['intensity']:.1%}")
-
-        with col2:
-            st.markdown("**Momentum Analizi**")
-            if 'trend' in prediction['momentum']:
-                st.markdown(f"**Trend:** {prediction['momentum']['trend'].replace('_', ' ').title()}")
-            if 'total' in prediction['momentum']:
-                st.progress(min(1.0, prediction['momentum']['total']), 
-                          text=f"Toplam Momentum: {min(1.0, prediction['momentum']['total']):.1%}")
 
 def display_player_analysis(player_stats: Dict):
     """Oyuncu analiz sonuçlarını göster"""
