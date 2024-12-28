@@ -128,7 +128,7 @@ def display_prediction_with_confidence(prediction: Dict):
                                 }
                             ))
                             fig.update_layout(height=250)
-                            st.plotly_chart(fig, use_container_width=True)
+                            st.plotly_chart(fig, use_container_width=True, key=f"gauge_{level}")
 
                     # Kalite faktörleri
                     if 'quality_factors' in pred:
@@ -149,7 +149,7 @@ def display_prediction_with_confidence(prediction: Dict):
                                        title="Tahmin Kalite Faktörleri",
                                        height=300)
                             fig.update_layout(yaxis_range=[0, 100])
-                            st.plotly_chart(fig, use_container_width=True)
+                            st.plotly_chart(fig, use_container_width=True, key=f"quality_factors_{level}")
                 else:
                     st.warning(f"Bu güven seviyesinde tahmin bulunmuyor.")
 
@@ -221,7 +221,27 @@ def display_match_details(fixture_id, match_info):
             # Calculate live win probabilities
             win_probs = calculate_live_win_probability(stats, score)
 
-            # Detaylı performans analizi
+            # AI Commentary Section
+            if st.session_state.commentator is not None:
+                st.subheader("Maç Yorumu")
+                commentary = st.session_state.commentator.generate_match_commentary(stats, score, events)
+                st.markdown(f"💬 {commentary}")
+
+                # Next Goal Prediction
+                next_goal = st.session_state.commentator.predict_next_goal(stats, events)
+                display_prediction_with_confidence(next_goal)
+
+            # Display win probability chart
+            st.subheader("Canlı Kazanma Olasılıkları")
+            win_prob_chart = create_probability_chart(
+                match_info['teams']['home']['name'],
+                match_info['teams']['away']['name'],
+                win_probs,
+                "Canlı Tahmin"
+            )
+            st.plotly_chart(win_prob_chart, use_container_width=True, key=f"win_prob_{fixture_id}")
+
+            # Takım Performans Analizi
             try:
                 if hasattr(st.session_state, 'performance_analyzer'):
                     performance_analysis = st.session_state.performance_analyzer.analyze_team_performance(stats, events)
@@ -235,17 +255,6 @@ def display_match_details(fixture_id, match_info):
                 performance_analysis = None
                 player_analysis = None
 
-            # AI Commentary Section
-            if st.session_state.commentator is not None:
-                st.subheader("Maç Yorumu")
-                commentary = st.session_state.commentator.generate_match_commentary(stats, score, events)
-                st.markdown(f"💬 {commentary}")
-
-                # Next Goal Prediction
-                next_goal = st.session_state.commentator.predict_next_goal(stats, events)
-                display_prediction_with_confidence(next_goal)
-
-            # Takım Performans Analizi
             if performance_analysis:
                 st.markdown("---")
                 st.header("Detaylı Performans Analizi")
@@ -260,15 +269,6 @@ def display_match_details(fixture_id, match_info):
 
                 with tab3:
                     display_player_analysis(player_analysis)
-
-            # Display win probability chart
-            st.subheader("Canlı Kazanma Olasılıkları")
-            st.plotly_chart(create_probability_chart(
-                match_info['teams']['home']['name'],
-                match_info['teams']['away']['name'],
-                win_probs,
-                "Canlı Tahmin"
-            ), use_container_width=True)
 
             # Display basic statistics
             if stats:
