@@ -9,6 +9,7 @@ from utils import (create_probability_chart, create_form_chart,
 # Initialize session state
 if 'data_handler' not in st.session_state:
     st.session_state.data_handler = DataHandler("c417cb5967msh54c12f850f3798cp12a733jsn315fab53ee3c")
+    st.session_state.models_trained = False
 
 if 'models' not in st.session_state:
     st.session_state.prediction_model = PredictionModel()
@@ -16,22 +17,21 @@ if 'models' not in st.session_state:
     st.session_state.statistical_model = StatisticalModel()
 
 # Page config
-st.set_page_config(page_title="Football Match Predictor", layout="wide")
+st.set_page_config(page_title="Futbol Maç Tahmini", layout="wide")
 
 # Title and description
-st.title("Football Match Prediction System")
+st.title("Futbol Maç Tahmin Sistemi")
 st.markdown("""
-This system uses multiple analysis methods to predict football match outcomes:
-- Machine Learning based prediction
-- Statistical Analysis
-- Odds-based calculation
+Bu sistem çoklu analiz yöntemleri kullanarak futbol maç sonuçlarını tahmin eder:
+- Makine Öğrenmesi tabanlı tahmin
+- İstatistiksel Analiz
+- Bahis oranları bazlı hesaplama
 """)
 
 # Load data
 @st.cache_data
 def load_data():
     try:
-        # Read CSV with low_memory=False to handle mixed types
         df = pd.read_csv('attached_assets/oranlar1234.csv', low_memory=False)
 
         # Convert score columns to numeric
@@ -55,55 +55,59 @@ def load_data():
         st.session_state.df_loaded = True
         return df
     except Exception as e:
-        st.error(f"Error loading data: {str(e)}")
+        st.error(f"Veri yükleme hatası: {str(e)}")
+        st.write("Detaylı hata bilgisi:", e)
         return None
 
 try:
     df = load_data()
     if df is not None:
         teams = sorted(df['HomeTeam'].unique())
-        st.success("Data loaded successfully!")
-        st.write(f"Total matches in dataset: {len(df)}")
-        st.write(f"Number of unique teams: {len(teams)}")
+        st.success("Veri başarıyla yüklendi!")
+        st.write(f"Toplam maç sayısı: {len(df)}")
+        st.write(f"Takım sayısı: {len(teams)}")
     else:
-        st.error("Could not load the dataset. Please check if the file exists and is accessible.")
+        st.error("Veri seti yüklenemedi. Lütfen dosyanın mevcut ve erişilebilir olduğunu kontrol edin.")
         st.stop()
 except Exception as e:
-    st.error(f"Error processing data: {str(e)}")
-    st.write("Detailed error information:", e)
+    st.error(f"Veri işleme hatası: {str(e)}")
+    st.write("Detaylı hata bilgisi:", e)
     st.stop()
 
 # Team selection
 col1, col2 = st.columns(2)
 
 with col1:
-    home_team = st.selectbox("Select Home Team", teams)
+    home_team = st.selectbox("Ev Sahibi Takım", teams)
 
 with col2:
     away_teams = [team for team in teams if team != home_team]
-    away_team = st.selectbox("Select Away Team", away_teams)
+    away_team = st.selectbox("Deplasman Takımı", away_teams)
 
 # Odds input
-st.subheader("Betting Odds (Optional)")
+st.subheader("Bahis Oranları (Opsiyonel)")
 odds_col1, odds_col2, odds_col3 = st.columns(3)
 
 with odds_col1:
-    home_odds = st.number_input("Home Win Odds", min_value=1.0, step=0.01)
+    home_odds = st.number_input("Ev Sahibi Galibiyet", min_value=1.0, step=0.01)
 
 with odds_col2:
-    draw_odds = st.number_input("Draw Odds", min_value=1.0, step=0.01)
+    draw_odds = st.number_input("Beraberlik", min_value=1.0, step=0.01)
 
 with odds_col3:
-    away_odds = st.number_input("Away Win Odds", min_value=1.0, step=0.01)
+    away_odds = st.number_input("Deplasman Galibiyet", min_value=1.0, step=0.01)
 
-# Make predictions when teams are selected
-if home_team and away_team:
+# Analysis button
+analyze_button = st.button("Analizi Başlat", type="primary")
+
+# Make predictions when teams are selected and button is clicked
+if home_team and away_team and analyze_button:
     try:
         # Train models if not already trained
-        if not hasattr(st.session_state.prediction_model, 'is_trained'):
-            with st.spinner("Training prediction models..."):
+        if not st.session_state.models_trained:
+            with st.spinner("Tahmin modelleri eğitiliyor..."):
                 st.session_state.prediction_model.train(df)
-                st.session_state.prediction_model.is_trained = True
+                st.session_state.models_trained = True
 
         # Get predictions from each model
         features = st.session_state.prediction_model.prepare_features(df, home_team, away_team)
@@ -119,54 +123,60 @@ if home_team and away_team:
         final_pred = calculate_combined_prediction(ml_pred, odds_pred, stat_pred)
 
         # Display predictions
-        st.subheader("Match Prediction")
+        st.subheader("Maç Sonuç Tahmini")
         col1, col2, col3 = st.columns(3)
 
         with col1:
             st.plotly_chart(create_probability_chart(
-                home_team, away_team, ml_pred, "Machine Learning"
+                home_team, away_team, ml_pred, "Makine Öğrenmesi"
             ), use_container_width=True)
 
         with col2:
             st.plotly_chart(create_probability_chart(
-                home_team, away_team, stat_pred, "Statistical"
+                home_team, away_team, stat_pred, "İstatistiksel"
             ), use_container_width=True)
 
         with col3:
             if odds_pred is not None:
                 st.plotly_chart(create_probability_chart(
-                    home_team, away_team, odds_pred, "Odds-Based"
+                    home_team, away_team, odds_pred, "Oran Bazlı"
                 ), use_container_width=True)
 
         # Display final combined prediction
-        st.subheader("Combined Prediction")
+        st.subheader("Birleşik Tahmin")
         st.plotly_chart(create_probability_chart(
-            home_team, away_team, final_pred, "Combined Model"
+            home_team, away_team, final_pred, "Birleşik Model"
         ), use_container_width=True)
 
+        # Goal prediction
+        st.subheader("Gol Tahmini")
+        goal_pred = st.session_state.prediction_model.predict_goals(features)
+        st.write(f"Tahmini gol sayısı: {goal_pred:.1f}")
+
+        # Over/Under probabilities
+        over_under = st.session_state.prediction_model.predict_over_under(features)
+        st.write(f"2.5 Üst olma olasılığı: {over_under[0]:.1%}")
+        st.write(f"2.5 Alt olma olasılığı: {over_under[1]:.1%}")
+
         # Display team form comparison
-        st.subheader("Team Form Comparison")
-        home_stats = st.session_state.prediction_model._calculate_form(
-            df[df['HomeTeam'] == home_team].tail(5), home_team
-        )
-        away_stats = st.session_state.prediction_model._calculate_form(
-            df[df['AwayTeam'] == away_team].tail(5), away_team
-        )
+        st.subheader("Takım Form Karşılaştırması")
+        home_form = st.session_state.prediction_model.get_team_form(df, home_team)
+        away_form = st.session_state.prediction_model.get_team_form(df, away_team)
 
         st.plotly_chart(create_form_chart(
-            [home_stats, home_stats, home_stats, home_stats, home_stats],
-            [away_stats, away_stats, away_stats, away_stats, away_stats],
+            home_form,
+            away_form,
             home_team, away_team
         ), use_container_width=True)
 
         # Display historical matches
-        st.subheader("Recent Head-to-Head Matches")
+        st.subheader("Son Karşılaşmalar")
         st.markdown(create_history_table(df, home_team, away_team), unsafe_allow_html=True)
 
     except Exception as e:
-        st.error(f"Error making predictions: {str(e)}")
-        st.write("Detailed error information:", e)
+        st.error(f"Tahmin hatası: {str(e)}")
+        st.write("Detaylı hata bilgisi:", e)
 
 # Footer
 st.markdown("---")
-st.markdown("Built with Streamlit • Data from API-Football")
+st.markdown("Streamlit ile geliştirilmiştir • Veriler API-Football'dan alınmıştır")
