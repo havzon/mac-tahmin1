@@ -54,12 +54,12 @@ def display_prediction_with_confidence(prediction: Dict):
         st.error(f"Tahmin hatası: {prediction['error']}")
         return
 
-    st.subheader("Gol Tahmini")
+    st.subheader("Gol Tahmini Analizi")
 
-    # Ana tahmin
+    # Ana tahmin (en yüksek güvenli tahmin)
     col1, col2 = st.columns(2)
     with col1:
-        st.write("**Tahmin:**", prediction['prediction'])
+        st.write("**Önerilen Tahmin:**", prediction['prediction'])
         if prediction['expected_time']:
             st.write("**Tahmini Zaman:**", f"{prediction['expected_time']}. dakika")
         st.write("**Güven Seviyesi:**", prediction['confidence'].title())
@@ -67,15 +67,70 @@ def display_prediction_with_confidence(prediction: Dict):
     with col2:
         st.progress(prediction['probability'], text=f"Olasılık: {prediction['probability']:.1%}")
 
+    # Tüm güven seviyelerindeki tahminler
+    if 'predictions' in prediction:
+        st.markdown("### Farklı Güven Seviyeli Tahminler")
+
+        tabs = st.tabs(["Yüksek Güven", "Orta Güven", "Düşük Güven"])
+
+        confidence_colors = {
+            'yüksek': '#2ecc71',  # Yeşil
+            'orta': '#f1c40f',    # Sarı
+            'düşük': '#e74c3c'    # Kırmızı
+        }
+
+        for tab, (level, color) in zip(tabs, confidence_colors.items()):
+            with tab:
+                if level in prediction['predictions']:
+                    pred = prediction['predictions'][level]
+
+                    col1, col2 = st.columns(2)
+                    with col1:
+                        st.markdown(f"**Tahmin Detayları**")
+                        st.markdown(f"Olasılık: **{pred['probability']:.1%}**")
+                        if 'reason' in pred:
+                            st.markdown(f"Tahmin Nedeni: *{pred['reason'].replace('_', ' ').title()}*")
+
+                        if 'quality_factors' in pred:
+                            st.markdown("**Kalite Faktörleri:**")
+                            for factor, value in pred['quality_factors'].items():
+                                st.progress(value, 
+                                          text=f"{factor.replace('_', ' ').title()}: {value:.1%}")
+
+                    with col2:
+                        if 'probability' in pred:
+                            import plotly.graph_objects as go
+
+                            fig = go.Figure(go.Indicator(
+                                mode = "gauge+number",
+                                value = pred['probability'] * 100,
+                                domain = {'x': [0, 1], 'y': [0, 1]},
+                                title = {'text': f"{level.title()} Güven"},
+                                gauge = {
+                                    'axis': {'range': [0, 100]},
+                                    'bar': {'color': color},
+                                    'steps': [
+                                        {'range': [0, 33], 'color': 'lightgray'},
+                                        {'range': [33, 66], 'color': 'gray'},
+                                        {'range': [66, 100], 'color': 'darkgray'}
+                                    ]
+                                }
+                            ))
+
+                            fig.update_layout(height=250)
+                            st.plotly_chart(fig, use_container_width=True)
+                else:
+                    st.warning(f"Bu güven seviyesinde tahmin bulunmuyor.")
+
     # Momentum ve maç durumu bilgileri
     if 'momentum' in prediction and 'match_state' in prediction:
-        with st.expander("Detaylı Analiz"):
+        with st.expander("Detaylı Maç Analizi"):
             col1, col2 = st.columns(2)
 
             with col1:
                 st.write("**Maç Durumu**")
                 if 'phase' in prediction['match_state']:
-                    st.write(f"Faz: {prediction['match_state']['phase'].replace('_', ' ').title()}")
+                    st.markdown(f"**Faz:** {prediction['match_state']['phase'].replace('_', ' ').title()}")
                 if 'intensity' in prediction['match_state']:
                     st.progress(prediction['match_state']['intensity'], 
                               text=f"Maç Yoğunluğu: {prediction['match_state']['intensity']:.1%}")
@@ -83,183 +138,36 @@ def display_prediction_with_confidence(prediction: Dict):
             with col2:
                 st.write("**Momentum Analizi**")
                 if 'trend' in prediction['momentum']:
-                    st.write(f"Trend: {prediction['momentum']['trend'].replace('_', ' ').title()}")
+                    st.markdown(f"**Trend:** {prediction['momentum']['trend'].replace('_', ' ').title()}")
                 if 'total' in prediction['momentum']:
                     st.progress(min(1.0, prediction['momentum']['total']), 
                               text=f"Toplam Momentum: {min(1.0, prediction['momentum']['total']):.1%}")
 
-def display_match_details(fixture_id, match_info):
-    """Display detailed statistics and events for a match"""
-    try:
-        with st.spinner("Maç detayları yükleniyor..."):
-            # Get match statistics
-            stats = st.session_state.data_handler.get_match_statistics(fixture_id)
-            events = st.session_state.data_handler.get_match_events(fixture_id)
+                # Momentum grafiği
+                if all(k in prediction['momentum'] for k in ['home', 'away']):
+                    import plotly.express as px
 
-            if not stats:
-                logger.warning(f"No statistics available for fixture {fixture_id}")
-                st.warning("Maç istatistikleri şu an için mevcut değil.")
-                return
+                    momentum_data = {
+                        'Takım': ['Ev Sahibi', 'Deplasman'],
+                        'Momentum': [
+                            prediction['momentum']['home'],
+                            prediction['momentum']['away']
+                        ]
+                    }
 
-            # Score information
-            score = [match_info['goals']['home'], match_info['goals']['away']]
+                    fig = px.bar(momentum_data, 
+                                x='Takım', 
+                                y='Momentum',
+                                color='Takım',
+                                text=[f'{v:.1%}' for v in momentum_data['Momentum']])
 
-            # AI Commentary Section
-            if st.session_state.commentator is not None:
-                st.subheader("Maç Yorumu")
-                commentary = st.session_state.commentator.generate_match_commentary(stats, score, events)
-                st.markdown(f"💬 {commentary}")
+                    fig.update_layout(
+                        title='Takım Momentumları',
+                        showlegend=False,
+                        height=250
+                    )
 
-                # Next Goal Prediction
-                next_goal = st.session_state.commentator.predict_next_goal(stats, events)
-                display_prediction_with_confidence(next_goal)
-
-            # Detaylı performans analizi
-            try:
-                if hasattr(st.session_state, 'performance_analyzer'):
-                    performance_analysis = st.session_state.performance_analyzer.analyze_team_performance(stats, events)
-                    player_analysis = st.session_state.performance_analyzer.analyze_player_performance(events)
-
-                    # Takım Performans Analizi
-                    if performance_analysis:
-                        st.markdown("---")
-                        st.header("Detaylı Performans Analizi")
-
-                        tab1, tab2, tab3 = st.tabs(["Ev Sahibi Analizi", "Deplasman Analizi", "Oyuncu Analizi"])
-
-                        with tab1:
-                            display_team_analysis(performance_analysis['home_team'], 'home')
-
-                        with tab2:
-                            display_team_analysis(performance_analysis['away_team'], 'away')
-
-                        with tab3:
-                            display_player_analysis(player_analysis)
-                else:
-                    logger.error("Performance analyzer not initialized")
-                    st.warning("Performans analizi henüz hazır değil.")
-            except Exception as e:
-                logger.error(f"Error in performance analysis: {str(e)}")
-                st.error("Performans analizi sırasında bir hata oluştu.")
-
-            # Display basic statistics
-            if stats:
-                st.subheader("Maç İstatistikleri")
-                col1, col2 = st.columns(2)
-
-                with col1:
-                    st.write(f"**{match_info['teams']['home']['name']}**")
-                    for stat in stats[0]['statistics']:
-                        if stat['value'] is not None:
-                            st.metric(
-                                label=stat['type'],
-                                value=stat['value'],
-                                delta=None
-                            )
-
-                with col2:
-                    st.write(f"**{match_info['teams']['away']['name']}**")
-                    for stat in stats[1]['statistics']:
-                        if stat['value'] is not None:
-                            st.metric(
-                                label=stat['type'],
-                                value=stat['value'],
-                                delta=None
-                            )
-
-            # Display match events
-            if events:
-                st.subheader("Önemli Olaylar")
-                for event in events:
-                    if event['type'] == 'Goal':
-                        st.success(format_event(event))
-                    elif event['type'] in ['Card', 'subst']:
-                        st.warning(format_event(event))
-                    else:
-                        st.info(format_event(event))
-
-    except Exception as e:
-        logger.error(f"Error displaying match details: {str(e)}")
-        st.error(f"Maç detayları gösterilirken bir hata oluştu: {str(e)}")
-
-def display_team_analysis(analysis: Dict, team_type: str):
-    """Takım analiz sonuçlarını göster"""
-    if not analysis or 'metrics' not in analysis:
-        st.warning("Takım analizi için yeterli veri yok.")
-        return
-
-    metrics = analysis['metrics']
-    st.subheader(f"{'Ev Sahibi' if team_type == 'home' else 'Deplasman'} Takım Analizi")
-
-    # Performans skoru
-    st.metric("Performans Skoru", f"{analysis['performance_score']:.2%}")
-
-    # Metrikler
-    col1, col2 = st.columns(2)
-    with col1:
-        st.write("**Hücum Metrikleri**")
-        st.progress(metrics['offensive_efficiency'], 
-                   text=f"Hücum Etkinliği: {metrics['offensive_efficiency']:.2%}")
-        st.progress(metrics['transition_speed'],
-                   text=f"Geçiş Hızı: {metrics['transition_speed']:.2%}")
-
-    with col2:
-        st.write("**Savunma Metrikleri**")
-        st.progress(metrics['defensive_stability'],
-                   text=f"Savunma İstikrarı: {metrics['defensive_stability']:.2%}")
-        st.progress(metrics['pressing_intensity'],
-                   text=f"Pressing Yoğunluğu: {metrics['pressing_intensity']:.2%}")
-
-    # Top kontrolü
-    st.progress(metrics['possession_control'],
-               text=f"Top Kontrolü: {metrics['possession_control']:.2%}")
-
-    # Güçlü ve zayıf yönler
-    col1, col2 = st.columns(2)
-    with col1:
-        st.write("**Güçlü Yönler**")
-        for strength in analysis.get('strengths', []):
-            st.success(f"✓ {strength}")
-
-    with col2:
-        st.write("**Geliştirilmesi Gereken Alanlar**")
-        for area in analysis.get('areas_to_improve', []):
-            st.warning(f"⚠ {area}")
-
-    # Performans trendi
-    if 'trend' in analysis and 'period_scores' in analysis['trend']:
-        st.write("**Performans Trendi**")
-        for period, score in analysis['trend']['period_scores'].items():
-            period_name = {
-                'first_15': 'İlk 15 dakika',
-                'mid_game': 'Orta bölüm',
-                'last_15': 'Son 15 dakika'
-            }[period]
-            st.progress(score, text=f"{period_name}: {score:.2f}")
-
-def display_player_analysis(player_stats: Dict):
-    """Oyuncu analiz sonuçlarını göster"""
-    if not player_stats:
-        st.warning("Oyuncu analizi için yeterli veri yok.")
-        return
-
-    st.subheader("Oyuncu Performans Analizi")
-
-    # Oyuncuları performans skorlarına göre sırala
-    sorted_players = sorted(
-        player_stats.items(),
-        key=lambda x: x[1]['rating'],
-        reverse=True
-    )
-
-    for player_id, stats in sorted_players:
-        with st.expander(f"{stats['name']} ({stats['team']}) - Puan: {stats['rating']:.1f}/10"):
-            st.write(f"**Performans Özeti:** {stats['summary']}")
-
-            if stats.get('key_moments'):
-                st.write("**Önemli Anlar:**")
-                for moment in stats['key_moments']:
-                    st.info(f"{moment['time']}' - {moment['event_type']}")
+                    st.plotly_chart(fig, use_container_width=True)
 
 def display_match_details(fixture_id, match_info):
     """Display detailed statistics and events for a match"""
@@ -452,3 +360,190 @@ except Exception as e:
     logger.error(f"Error in main page execution: {str(e)}")
     st.error(f"Bir hata oluştu: {str(e)}")
     st.info("Sayfayı yenilemek için F5 tuşuna basın veya sayfayı manuel olarak yenileyin.")
+
+def display_team_analysis(analysis: Dict, team_type: str):
+    """Takım analiz sonuçlarını göster"""
+    if not analysis or 'metrics' not in analysis:
+        st.warning("Takım analizi için yeterli veri yok.")
+        return
+
+    metrics = analysis['metrics']
+    st.subheader(f"{'Ev Sahibi' if team_type == 'home' else 'Deplasman'} Takım Analizi")
+
+    # Performans skoru
+    st.metric("Performans Skoru", f"{analysis['performance_score']:.2%}")
+
+    # Metrikler
+    col1, col2 = st.columns(2)
+    with col1:
+        st.write("**Hücum Metrikleri**")
+        st.progress(metrics['offensive_efficiency'], 
+                   text=f"Hücum Etkinliği: {metrics['offensive_efficiency']:.2%}")
+        st.progress(metrics['transition_speed'],
+                   text=f"Geçiş Hızı: {metrics['transition_speed']:.2%}")
+
+    with col2:
+        st.write("**Savunma Metrikleri**")
+        st.progress(metrics['defensive_stability'],
+                   text=f"Savunma İstikrarı: {metrics['defensive_stability']:.2%}")
+        st.progress(metrics['pressing_intensity'],
+                   text=f"Pressing Yoğunluğu: {metrics['pressing_intensity']:.2%}")
+
+    # Top kontrolü
+    st.progress(metrics['possession_control'],
+               text=f"Top Kontrolü: {metrics['possession_control']:.2%}")
+
+    # Güçlü ve zayıf yönler
+    col1, col2 = st.columns(2)
+    with col1:
+        st.write("**Güçlü Yönler**")
+        for strength in analysis.get('strengths', []):
+            st.success(f"✓ {strength}")
+
+    with col2:
+        st.write("**Geliştirilmesi Gereken Alanlar**")
+        for area in analysis.get('areas_to_improve', []):
+            st.warning(f"⚠ {area}")
+
+    # Performans trendi
+    if 'trend' in analysis and 'period_scores' in analysis['trend']:
+        st.write("**Performans Trendi**")
+        for period, score in analysis['trend']['period_scores'].items():
+            period_name = {
+                'first_15': 'İlk 15 dakika',
+                'mid_game': 'Orta bölüm',
+                'last_15': 'Son 15 dakika'
+            }[period]
+            st.progress(score, text=f"{period_name}: {score:.2f}")
+
+def display_player_analysis(player_stats: Dict):
+    """Oyuncu analiz sonuçlarını göster"""
+    if not player_stats:
+        st.warning("Oyuncu analizi için yeterli veri yok.")
+        return
+
+    st.subheader("Oyuncu Performans Analizi")
+
+    # Oyuncuları performans skorlarına göre sırala
+    sorted_players = sorted(
+        player_stats.items(),
+        key=lambda x: x[1]['rating'],
+        reverse=True
+    )
+
+    for player_id, stats in sorted_players:
+        with st.expander(f"{stats['name']} ({stats['team']}) - Puan: {stats['rating']:.1f}/10"):
+            st.write(f"**Performans Özeti:** {stats['summary']}")
+
+            if stats.get('key_moments'):
+                st.write("**Önemli Anlar:**")
+                for moment in stats['key_moments']:
+                    st.info(f"{moment['time']}' - {moment['event_type']}")
+
+def display_match_details(fixture_id, match_info):
+    """Display detailed statistics and events for a match"""
+    try:
+        with st.spinner("Maç detayları yükleniyor..."):
+            # Get match statistics
+            stats = st.session_state.data_handler.get_match_statistics(fixture_id)
+            events = st.session_state.data_handler.get_match_events(fixture_id)
+
+            if not stats:
+                logger.warning(f"No statistics available for fixture {fixture_id}")
+                st.warning("Maç istatistikleri şu an için mevcut değil.")
+                return
+
+            # Score information
+            score = [match_info['goals']['home'], match_info['goals']['away']]
+
+            # Calculate live win probabilities
+            win_probs = calculate_live_win_probability(stats, score)
+
+            # Detaylı performans analizi
+            try:
+                if hasattr(st.session_state, 'performance_analyzer'):
+                    performance_analysis = st.session_state.performance_analyzer.analyze_team_performance(stats, events)
+                    player_analysis = st.session_state.performance_analyzer.analyze_player_performance(events)
+                else:
+                    logger.error("Performance analyzer not initialized")
+                    performance_analysis = None
+                    player_analysis = None
+            except Exception as e:
+                logger.error(f"Error in performance analysis: {str(e)}")
+                performance_analysis = None
+                player_analysis = None
+
+            # AI Commentary Section
+            if st.session_state.commentator is not None:
+                st.subheader("Maç Yorumu")
+                commentary = st.session_state.commentator.generate_match_commentary(stats, score, events)
+                st.markdown(f"💬 {commentary}")
+
+                # Next Goal Prediction
+                next_goal = st.session_state.commentator.predict_next_goal(stats, events)
+                display_prediction_with_confidence(next_goal)
+
+            # Takım Performans Analizi
+            if performance_analysis:
+                st.markdown("---")
+                st.header("Detaylı Performans Analizi")
+
+                tab1, tab2, tab3 = st.tabs(["Ev Sahibi Analizi", "Deplasman Analizi", "Oyuncu Analizi"])
+
+                with tab1:
+                    display_team_analysis(performance_analysis['home_team'], 'home')
+
+                with tab2:
+                    display_team_analysis(performance_analysis['away_team'], 'away')
+
+                with tab3:
+                    display_player_analysis(player_analysis)
+
+            # Display win probability chart
+            st.subheader("Canlı Kazanma Olasılıkları")
+            st.plotly_chart(create_probability_chart(
+                match_info['teams']['home']['name'],
+                match_info['teams']['away']['name'],
+                win_probs,
+                "Canlı Tahmin"
+            ), use_container_width=True)
+
+            # Display basic statistics
+            if stats:
+                st.subheader("Maç İstatistikleri")
+                col1, col2 = st.columns(2)
+
+                with col1:
+                    st.write(f"**{match_info['teams']['home']['name']}**")
+                    for stat in stats[0]['statistics']:
+                        if stat['value'] is not None:
+                            st.metric(
+                                label=stat['type'],
+                                value=stat['value'],
+                                delta=None
+                            )
+
+                with col2:
+                    st.write(f"**{match_info['teams']['away']['name']}**")
+                    for stat in stats[1]['statistics']:
+                        if stat['value'] is not None:
+                            st.metric(
+                                label=stat['type'],
+                                value=stat['value'],
+                                delta=None
+                            )
+
+            # Display match events
+            if events:
+                st.subheader("Önemli Olaylar")
+                for event in events:
+                    if event['type'] == 'Goal':
+                        st.success(format_event(event))
+                    elif event['type'] in ['Card', 'subst']:
+                        st.warning(format_event(event))
+                    else:
+                        st.info(format_event(event))
+
+    except Exception as e:
+        logger.error(f"Error displaying match details: {str(e)}")
+        st.error(f"Maç detayları gösterilirken bir hata oluştu: {str(e)}")
