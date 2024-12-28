@@ -89,7 +89,7 @@ class MatchCommentator:
             logger.error(f"Error generating match commentary: {str(e)}")
             return "Maç yorumu oluşturulurken bir hata meydana geldi."
 
-    def predict_next_goal(self, match_stats: Dict, events: List[Dict]) -> Dict:
+    def predict_next_goal(self, match_stats: Dict, events: List[Dict], betting_odds: Optional[Dict] = None) -> Dict:
         """Bir sonraki golü kimin atacağını tahmin et"""
         try:
             if not match_stats or len(match_stats) < 2:
@@ -111,6 +111,32 @@ class MatchCommentator:
                     'expected_time': None,
                     'confidence': 'düşük'
                 }
+
+            # Bahis oranları varsa tahminleri güncelle
+            if betting_odds:
+                try:
+                    # Bahis oranlarından olasılıkları hesapla
+                    total_prob = sum(1/float(odd) for odd in betting_odds.values())
+                    implied_probs = {k: (1/float(v))/total_prob for k, v in betting_odds.items()}
+
+                    # Her güven seviyesi için bahis oranlarını entegre et
+                    for confidence_level in predictions['predictions']:
+                        pred = predictions['predictions'][confidence_level]
+
+                        # Oranları tahminle birleştir (0.7 tahmin, 0.3 bahis oranı ağırlığı)
+                        if 'probability' in pred:
+                            pred['probability'] = (
+                                pred['probability'] * 0.7 + 
+                                implied_probs.get('next_goal', 0.5) * 0.3
+                            )
+
+                        # Kalite faktörlerine bahis oranı güvenini ekle
+                        if 'quality_factors' not in pred:
+                            pred['quality_factors'] = {}
+                        pred['quality_factors']['betting_confidence'] = min(1.0, max(0.3, 1/total_prob))
+
+                except Exception as e:
+                    logger.error(f"Error processing betting odds: {str(e)}")
 
             # En uygun tahmini seç
             recommended_level = predictions.get('recommended', 'düşük')
@@ -146,15 +172,32 @@ class MatchCommentator:
             elif momentum.get('trend') in ['güçlü_ev_sahibi', 'güçlü_deplasman']:
                 prediction += f" ({momentum['trend'].replace('_', ' ').title()})"
 
-            return {
-                'prediction': prediction,
-                'probability': probability,
-                'expected_time': selected_prediction.get('expected_time'),
-                'confidence': confidence,
-                'reason': reason,
-                'match_state': match_state,
-                'momentum': momentum
-            }
+            # Bahis oranları varsa ekle
+            if betting_odds:
+                prediction_data = {
+                    'prediction': prediction,
+                    'probability': probability,
+                    'expected_time': selected_prediction.get('expected_time'),
+                    'confidence': confidence,
+                    'reason': reason,
+                    'match_state': match_state,
+                    'momentum': momentum,
+                    'betting_odds': betting_odds,
+                    'predictions': predictions['predictions']
+                }
+            else:
+                prediction_data = {
+                    'prediction': prediction,
+                    'probability': probability,
+                    'expected_time': selected_prediction.get('expected_time'),
+                    'confidence': confidence,
+                    'reason': reason,
+                    'match_state': match_state,
+                    'momentum': momentum,
+                    'predictions': predictions['predictions']
+                }
+
+            return prediction_data
 
         except Exception as e:
             logger.error(f"Error predicting next goal: {str(e)}")

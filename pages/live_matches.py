@@ -67,6 +67,24 @@ def display_prediction_with_confidence(prediction: Dict):
     with col2:
         st.progress(prediction['probability'], text=f"Olasılık: {prediction['probability']:.1%}")
 
+    # Bahis oranları gösterimi
+    if 'betting_odds' in prediction:
+        st.markdown("### Bahis Oranları Analizi")
+        odds_col1, odds_col2 = st.columns(2)
+
+        with odds_col1:
+            st.markdown("**Canlı Bahis Oranları**")
+            for bet_type, odd in prediction['betting_odds'].items():
+                st.markdown(f"- {bet_type.replace('_', ' ').title()}: **{odd}**")
+
+        with odds_col2:
+            if 'quality_factors' in prediction['predictions'][prediction['confidence']]:
+                quality = prediction['predictions'][prediction['confidence']]['quality_factors']
+                if 'betting_confidence' in quality:
+                    st.markdown("**Bahis Güven Faktörü**")
+                    st.progress(quality['betting_confidence'], 
+                              text=f"Güven: {quality['betting_confidence']:.1%}")
+
     # Tüm güven seviyelerindeki tahminler
     if 'predictions' in prediction:
         st.markdown("### Farklı Güven Seviyeli Tahminler")
