@@ -3,6 +3,7 @@ import xgboost as xgb
 import logging
 from typing import Dict, List, Optional, Tuple
 from team_analyzer import TeamAnalyzer
+from sklearn.preprocessing import StandardScaler
 
 # Configure logging
 logging.basicConfig(level=logging.INFO)
@@ -14,6 +15,7 @@ class MLPredictor:
         logger.info("Initializing ML Predictor")
         self.model = None
         self.team_analyzer = TeamAnalyzer()
+        self.scaler = StandardScaler()
         self._initialize_model()
 
     def _initialize_model(self):
@@ -22,7 +24,7 @@ class MLPredictor:
             self.model = xgb.XGBRegressor(
                 n_estimators=200,  # Model karmaşıklığını artır
                 learning_rate=0.05,  # Daha hassas öğrenme
-                max_depth=7,  # Daha derin ağaç yapısı
+                max_depth=7,  # Derin ağaç yapısı
                 subsample=0.8,  # Overfitting'i önle
                 colsample_bytree=0.8,  # Feature seçimi
                 objective='reg:squarederror'
@@ -34,52 +36,41 @@ class MLPredictor:
 
     def predict_goals(self, match_stats: Dict, events: List[Dict], 
                      historical_data: Optional[Dict] = None) -> Dict:
-        """Gelişmiş gol olasılığı tahmini - çoklu güven seviyeli"""
+        """Gelişmiş gol olasılığı tahmini"""
         try:
             # Form ve taktik analizi
             home_team_id = match_stats[0]['team']['id']
             away_team_id = match_stats[1]['team']['id']
 
-            home_form = self.team_analyzer.analyze_team_form(home_team_id, historical_data or [])
-            away_form = self.team_analyzer.analyze_team_form(away_team_id, historical_data or [])
-
-            home_tactics = self.team_analyzer.analyze_tactical_patterns(home_team_id, historical_data or [])
-            away_tactics = self.team_analyzer.analyze_tactical_patterns(away_team_id, historical_data or [])
-
             # Özellik çıkarımı
             features = self._extract_enhanced_features(
-                match_stats, events, home_form, away_form,
-                home_tactics, away_tactics
+                match_stats, events, historical_data
             )
 
-            # Farklı güven seviyeleri için tahminler
-            predictions = {
-                'yüksek': self._predict_with_high_confidence(features, match_stats, events),
-                'orta': self._predict_with_medium_confidence(features, match_stats, events),
-                'düşük': self._predict_with_low_confidence(features, match_stats, events)
-            }
+            # Tahmin ve güvenilirlik analizi
+            prediction = self.model.predict(features)[0] if self.model else 0.5
+            confidence_level, confidence_factors = self._calculate_detailed_confidence(
+                features, match_stats, events
+            )
 
             # Maç durumu ve momentum analizi
             match_state = self._analyze_match_state(events, match_stats)
             momentum_factors = self._calculate_momentum_factors(
-                events, match_stats, home_form, away_form
+                events, match_stats
             )
 
-            # Her güven seviyesi için tahminleri ayarla
-            for confidence_level, pred in predictions.items():
-                pred['probability'] = self._adjust_prediction(
-                    pred['base_probability'],
-                    match_state,
-                    momentum_factors,
-                    confidence_level
-                )
-
-            # En uygun tahmini seç
-            best_prediction = self._select_best_prediction(predictions, match_state)
+            # Tahmin ayarlama
+            adjusted_prediction = self._adjust_prediction(
+                prediction,
+                match_state,
+                momentum_factors,
+                confidence_level
+            )
 
             return {
-                'predictions': predictions,
-                'recommended': best_prediction,
+                'prediction': adjusted_prediction,
+                'confidence_level': confidence_level,
+                'confidence_factors': confidence_factors,
                 'match_state': match_state,
                 'momentum': momentum_factors
             }
@@ -87,105 +78,273 @@ class MLPredictor:
         except Exception as e:
             logger.error(f"Error making prediction: {str(e)}")
             return {
-                'predictions': {},
-                'recommended': 'düşük',
+                'prediction': 0.5,
+                'confidence_level': 'düşük',
+                'confidence_factors': {},
                 'match_state': {},
                 'momentum': {}
             }
 
-    def _predict_with_high_confidence(self, features: np.ndarray, match_stats: Dict, 
-                                    events: List[Dict]) -> Dict:
-        """Yüksek güvenli tahmin"""
+    def _extract_enhanced_features(self, match_stats: Dict, events: List[Dict],
+                                historical_data: Optional[Dict] = None) -> np.ndarray:
+        """Maç istatistiklerinden gelişmiş özellik çıkarımı"""
         try:
-            # Temel tahmin
-            base_prob = self.model.predict(features)[0] if self.model else 0.5
+            features = []
 
-            # Veri kalitesi kontrolü
-            data_quality = self._check_data_quality(match_stats)
-            if data_quality < 0.8:  # Yüksek güven için minimum veri kalitesi
-                return {'base_probability': 0.0, 'confidence': 'düşük', 'reason': 'yetersiz_veri'}
+            # Temel istatistikler
+            basic_stats = self._extract_basic_stats(match_stats)
+            features.extend(basic_stats)
 
-            # Maç olgunluğu kontrolü
-            if events and events[-1]['time']['elapsed'] < 15:
-                return {'base_probability': 0.0, 'confidence': 'düşük', 'reason': 'erken_maç'}
+            # Olay bazlı özellikler
+            event_features = self._extract_event_features(events)
+            features.extend(event_features)
 
-            # Özel faktörler
-            stat_consistency = self._check_statistical_consistency(match_stats)
-            event_consistency = self._check_event_consistency(events)
+            # Momentum faktörleri
+            momentum_features = self._calculate_momentum_metrics(events)
+            features.extend(momentum_features)
 
-            if stat_consistency > 0.8 and event_consistency > 0.8:
-                return {
-                    'base_probability': base_prob,
-                    'confidence': 'yüksek',
-                    'reason': 'tutarlı_veriler',
-                    'quality_factors': {
-                        'data_quality': data_quality,
-                        'stat_consistency': stat_consistency,
-                        'event_consistency': event_consistency
-                    }
-                }
-            else:
-                return {'base_probability': 0.0, 'confidence': 'orta', 'reason': 'tutarsız_veriler'}
+            # Normalize ve reshape
+            features = np.array(features).reshape(1, -1)
+            return self.scaler.fit_transform(features)
 
         except Exception as e:
-            logger.error(f"Error in high confidence prediction: {str(e)}")
-            return {'base_probability': 0.0, 'confidence': 'düşük', 'reason': 'hata'}
+            logger.error(f"Error extracting features: {str(e)}")
+            return np.zeros((1, 15))
 
-    def _predict_with_medium_confidence(self, features: np.ndarray, match_stats: Dict,
-                                      events: List[Dict]) -> Dict:
-        """Orta güvenli tahmin"""
+    def _extract_basic_stats(self, match_stats: Dict) -> List[float]:
+        """Temel istatistikleri çıkar"""
         try:
-            base_prob = self.model.predict(features)[0] if self.model else 0.5
-            data_quality = self._check_data_quality(match_stats)
+            home_stats = match_stats[0]['statistics']
+            away_stats = match_stats[1]['statistics']
 
-            if data_quality < 0.6:  # Orta güven için minimum veri kalitesi
-                return {'base_probability': 0.0, 'confidence': 'düşük', 'reason': 'yetersiz_veri'}
+            stats = []
 
-            # Orta seviye faktörler
-            momentum_quality = self._check_momentum_quality(events)
-            stat_relevance = self._check_statistical_relevance(match_stats)
+            # Şut istatistikleri
+            stats.extend([
+                float(home_stats[0]['value'] or 0),  # Toplam şut
+                float(away_stats[0]['value'] or 0),
+                float(home_stats[2]['value'] or 0),  # İsabetli şut
+                float(away_stats[2]['value'] or 0)
+            ])
 
-            if momentum_quality > 0.6 and stat_relevance > 0.6:
-                return {
-                    'base_probability': base_prob,
-                    'confidence': 'orta',
-                    'reason': 'yeterli_veri',
-                    'quality_factors': {
-                        'data_quality': data_quality,
-                        'momentum_quality': momentum_quality,
-                        'stat_relevance': stat_relevance
-                    }
-                }
-            else:
-                return {'base_probability': base_prob, 'confidence': 'düşük', 'reason': 'düşük_kalite'}
+            # Top kontrolü
+            possession = float(home_stats[9]['value'].strip('%')) / 100 if home_stats[9]['value'] else 0.5
+            stats.append(possession)
+
+            # Ataklar
+            stats.extend([
+                float(home_stats[13]['value'] or 0),  # Tehlikeli atak
+                float(away_stats[13]['value'] or 0)
+            ])
+
+            return stats
 
         except Exception as e:
-            logger.error(f"Error in medium confidence prediction: {str(e)}")
-            return {'base_probability': 0.0, 'confidence': 'düşük', 'reason': 'hata'}
+            logger.error(f"Error extracting basic stats: {str(e)}")
+            return [0.0] * 7
 
-    def _predict_with_low_confidence(self, features: np.ndarray, match_stats: Dict,
-                                   events: List[Dict]) -> Dict:
-        """Düşük güvenli tahmin"""
+    def _extract_event_features(self, events: List[Dict]) -> List[float]:
+        """Olay bazlı özellikler"""
         try:
-            base_prob = self.model.predict(features)[0] if self.model else 0.5
+            if not events:
+                return [0.0] * 5
 
-            # Temel kontroller
-            basic_quality = self._check_basic_data_quality(match_stats)
-            has_events = bool(events)
+            recent_events = events[-10:]
+            event_counts = {
+                'Goal': 0, 'Card': 0, 'subst': 0,
+                'Var': 0, 'Shot': 0
+            }
+
+            for event in recent_events:
+                event_type = event['type']
+                event_counts[event_type] = event_counts.get(event_type, 0) + 1
+
+            features = [
+                event_counts['Goal'] / 10,
+                event_counts['Shot'] / 10,
+                event_counts['Card'] / 10,
+                event_counts['Var'] / 10,
+                event_counts['subst'] / 10
+            ]
+
+            return features
+
+        except Exception as e:
+            logger.error(f"Error extracting event features: {str(e)}")
+            return [0.0] * 5
+
+    def _calculate_momentum_metrics(self, events: List[Dict]) -> List[float]:
+        """Momentum metrikleri"""
+        try:
+            if not events:
+                return [0.0] * 3
+
+            recent_events = events[-5:]
+            momentum = 0.0
+            intensity = 0.0
+
+            for event in recent_events:
+                if event['type'] == 'Goal':
+                    momentum += 0.3
+                elif event['type'] == 'Shot':
+                    momentum += 0.1
+                elif event['type'] == 'Card':
+                    momentum -= 0.1
+
+                intensity += 0.1
+
+            return [
+                momentum,
+                intensity / len(recent_events),
+                len(recent_events) / 5  # Event yoğunluğu
+            ]
+
+        except Exception as e:
+            logger.error(f"Error calculating momentum metrics: {str(e)}")
+            return [0.0] * 3
+
+    def _adjust_prediction(self, base_prediction: float, match_state: Dict,
+                         momentum_factors: Dict, confidence_level: str) -> float:
+        """Tahmin ayarlama"""
+        try:
+            adjusted = base_prediction
+
+            # Momentum etkisi
+            momentum_effect = momentum_factors.get('total', 0) * 0.1
+            adjusted += momentum_effect
+
+            # Maç durumu etkisi
+            if match_state.get('phase') == 'son_dakikalar':
+                adjusted *= 1.2
+            elif match_state.get('phase') == 'başlangıç':
+                adjusted *= 0.9
+
+            # Güven seviyesi etkisi
+            confidence_multipliers = {
+                'yüksek': 1.1,
+                'orta': 1.0,
+                'düşük': 0.9
+            }
+            adjusted *= confidence_multipliers.get(confidence_level, 1.0)
+
+            return max(0.0, min(1.0, adjusted))
+
+        except Exception as e:
+            logger.error(f"Error adjusting prediction: {str(e)}")
+            return base_prediction
+
+    def _analyze_match_state(self, events: List[Dict], match_stats: Dict) -> Dict:
+        """Maç durumu analizi"""
+        try:
+            if not events:
+                return {'phase': 'başlangıç', 'intensity': 0.0}
+
+            current_time = events[-1]['time']['elapsed']
+
+            # Maç fazı
+            if current_time <= 15:
+                phase = 'başlangıç'
+            elif current_time <= 75:
+                phase = 'orta'
+            else:
+                phase = 'son_dakikalar'
+
+            # Oyun yoğunluğu
+            recent_events = events[-5:]
+            intensity = len([e for e in recent_events 
+                           if e['type'] in ['Shot', 'Goal', 'Corner']]) / 5
 
             return {
-                'base_probability': base_prob,
-                'confidence': 'düşük',
-                'reason': 'minimum_veri',
-                'quality_factors': {
-                    'basic_quality': basic_quality,
-                    'has_events': has_events
-                }
+                'phase': phase,
+                'intensity': intensity,
+                'time': current_time
             }
 
         except Exception as e:
-            logger.error(f"Error in low confidence prediction: {str(e)}")
-            return {'base_probability': 0.0, 'confidence': 'düşük', 'reason': 'hata'}
+            logger.error(f"Error analyzing match state: {str(e)}")
+            return {'phase': 'belirsiz', 'intensity': 0.0}
+
+    def _calculate_momentum_factors(self, events: List[Dict], match_stats: Dict) -> Dict:
+        """Momentum faktörleri hesaplama"""
+        try:
+            if not events:
+                return {'home': 0.0, 'away': 0.0, 'total': 0.0}
+
+            recent_events = events[-10:]
+            home_momentum = 0.0
+            away_momentum = 0.0
+
+            for event in recent_events:
+                event_weight = {
+                    'Goal': 0.3,
+                    'Shot': 0.1,
+                    'Corner': 0.05,
+                    'Card': -0.1
+                }.get(event['type'], 0.0)
+
+                if event['team']['id'] == match_stats[0]['team']['id']:
+                    home_momentum += event_weight
+                else:
+                    away_momentum += event_weight
+
+            return {
+                'home': home_momentum,
+                'away': away_momentum,
+                'total': home_momentum + away_momentum
+            }
+
+        except Exception as e:
+            logger.error(f"Error calculating momentum factors: {str(e)}")
+            return {'home': 0.0, 'away': 0.0, 'total': 0.0}
+
+    def _calculate_detailed_confidence(self, features: np.ndarray,
+                                    match_stats: Dict,
+                                    events: List[Dict]) -> Tuple[str, Dict]:
+        """Detaylı güven analizi"""
+        try:
+            confidence_factors = {}
+
+            # Veri kalitesi
+            valid_stats = sum(1 for stat in match_stats[0]['statistics'] 
+                            if stat['value'] is not None)
+            data_quality = valid_stats / len(match_stats[0]['statistics'])
+
+            # Maç olgunluğu
+            if events:
+                match_maturity = min(1.0, events[-1]['time']['elapsed'] / 90)
+            else:
+                match_maturity = 0.0
+
+            # Feature varyansı
+            feature_variance = float(np.var(features))
+
+            # Toplam güven skoru
+            confidence_score = (
+                data_quality * 0.4 +
+                match_maturity * 0.3 +
+                feature_variance * 0.3
+            )
+
+            # Güven seviyesi
+            if confidence_score > 0.7:
+                confidence_level = 'yüksek'
+            elif confidence_score > 0.4:
+                confidence_level = 'orta'
+            else:
+                confidence_level = 'düşük'
+
+            confidence_factors.update({
+                'data_quality': data_quality,
+                'match_maturity': match_maturity,
+                'feature_variance': feature_variance,
+                'total_score': confidence_score
+            })
+
+            return confidence_level, confidence_factors
+
+        except Exception as e:
+            logger.error(f"Error calculating confidence: {str(e)}")
+            return 'düşük', {'error': str(e)}
 
     def _check_statistical_consistency(self, match_stats: Dict) -> float:
         """İstatistiksel tutarlılık kontrolü"""
@@ -549,8 +708,7 @@ class MLPredictor:
             logger.error(f"Error analyzing match state: {str(e)}")
             return {'phase': 'belirsiz', 'intensity': 0.0, 'control': 'dengeli'}
 
-    def _calculate_momentum_factors(self, events: List[Dict], match_stats: Dict,
-                                  home_form: Dict, away_form: Dict) -> Dict:
+    def _calculate_momentum_factors(self, events: List[Dict], match_stats: Dict) -> Dict:
         """Gelişmiş momentum faktörleri hesaplama"""
         try:
             if not events:
@@ -571,12 +729,12 @@ class MLPredictor:
                     'subst': 0.02
                 }.get(event['type'], 0.0)
 
-                # Form bazlı ağırlık ayarı
+
+                # Form bazlı ağırlık ayarı  (removed because home_form and away_form are not passed)
+
                 if event['team']['id'] == match_stats[0]['team']['id']:
-                    event_weight *= (1 + home_form['metrics']['overall_form'])
                     home_momentum += event_weight
                 else:
-                    event_weight *= (1 + away_form['metrics']['overall_form'])
                     away_momentum += event_weight
 
             # Momentum trendi
