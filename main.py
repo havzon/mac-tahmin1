@@ -5,6 +5,7 @@ from data_handler import DataHandler
 from models import PredictionModel, OddsBasedModel, StatisticalModel
 from utils import (create_probability_chart, create_form_chart,
                   create_history_table, calculate_combined_prediction)
+from strategy_advisor import StrategyAdvisor
 
 # Initialize session state
 if 'data_handler' not in st.session_state:
@@ -15,6 +16,7 @@ if 'models' not in st.session_state:
     st.session_state.prediction_model = PredictionModel()
     st.session_state.odds_model = OddsBasedModel()
     st.session_state.statistical_model = StatisticalModel()
+    st.session_state.strategy_advisor = None
 
 # Page config
 st.set_page_config(page_title="Futbol Maç Tahmini", layout="wide")
@@ -66,6 +68,10 @@ try:
         st.success("Veri başarıyla yüklendi!")
         st.write(f"Toplam maç sayısı: {len(df)}")
         st.write(f"Takım sayısı: {len(teams)}")
+
+        # Strategy Advisor'ı başlat
+        if st.session_state.strategy_advisor is None:
+            st.session_state.strategy_advisor = StrategyAdvisor(df)
     else:
         st.error("Veri seti yüklenemedi. Lütfen dosyanın mevcut ve erişilebilir olduğunu kontrol edin.")
         st.stop()
@@ -172,6 +178,60 @@ if home_team and away_team and analyze_button:
         # Display historical matches
         st.subheader("Son Karşılaşmalar")
         st.markdown(create_history_table(df, home_team, away_team), unsafe_allow_html=True)
+
+        # Stratejik analiz bölümü
+        st.subheader("Stratejik Analiz")
+
+        # Takım stilleri
+        col1, col2 = st.columns(2)
+        with col1:
+            home_style = st.session_state.strategy_advisor.analyze_team_style(home_team)
+            st.write(f"**{home_team} Oyun Stili:**")
+            for metric, value in home_style.items():
+                st.progress(value, text=metric.replace('_', ' ').title())
+
+        with col2:
+            away_style = st.session_state.strategy_advisor.analyze_team_style(away_team)
+            st.write(f"**{away_team} Oyun Stili:**")
+            for metric, value in away_style.items():
+                st.progress(value, text=metric.replace('_', ' ').title())
+
+        # Taktik önerileri
+        st.subheader("Taktik Önerileri")
+        advice = st.session_state.strategy_advisor.generate_tactical_advice(home_team, away_team)
+
+        tab1, tab2, tab3 = st.tabs(["Hücum", "Savunma", "Genel"])
+
+        with tab1:
+            for tip in advice['attacking']:
+                st.info(tip)
+
+        with tab2:
+            for tip in advice['defensive']:
+                st.warning(tip)
+
+        with tab3:
+            for tip in advice['general']:
+                st.success(tip)
+
+        # Kilit oyuncu rolleri
+        st.subheader("Önemli Oyuncu Rolleri")
+        col1, col2 = st.columns(2)
+
+        with col1:
+            st.write(f"**{home_team} için önemli roller:**")
+            for role in st.session_state.strategy_advisor.get_key_player_roles(home_team):
+                st.write(f"• {role}")
+
+        with col2:
+            st.write(f"**{away_team} için önemli roller:**")
+            for role in st.session_state.strategy_advisor.get_key_player_roles(away_team):
+                st.write(f"• {role}")
+
+        # Maç tempo tahmini
+        st.subheader("Maç Tempo Tahmini")
+        tempo = st.session_state.strategy_advisor.predict_match_tempo(home_team, away_team)
+        st.info(tempo)
 
     except Exception as e:
         st.error(f"Tahmin hatası: {str(e)}")
