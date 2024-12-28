@@ -1,10 +1,15 @@
 import streamlit as st
 import time
+import logging
 from data_handler import DataHandler
 from models import StatisticalModel
 from utils import create_probability_chart, create_form_chart
 from strategy_advisor import StrategyAdvisor
 from match_commentator import MatchCommentator
+
+# Configure logging
+logging.basicConfig(level=logging.INFO)
+logger = logging.getLogger(__name__)
 
 st.set_page_config(page_title="Canlı Maçlar", layout="wide")
 
@@ -17,23 +22,31 @@ if 'data_handler' not in st.session_state:
             st.session_state.statistical_model = StatisticalModel()
             st.session_state.strategy_advisor = StrategyAdvisor(None)  # Will be updated with data
         else:
+            logger.error("API key not found in secrets")
             st.error("API anahtarı bulunamadı. Lütfen RAPIDAPI_KEY'i Secrets kısmına ekleyin.")
             st.stop()
     except Exception as e:
+        logger.error(f"Error initializing API connection: {str(e)}")
         st.error(f"API bağlantısı sırasında hata oluştu: {str(e)}")
         st.stop()
 
 # Initialize commentator separately to handle any potential errors
 if 'commentator' not in st.session_state:
     try:
+        logger.info("Initializing MatchCommentator")
         st.session_state.commentator = MatchCommentator()
     except Exception as e:
+        logger.error(f"Error initializing commentator: {str(e)}")
         st.error(f"Yorumlayıcı başlatılırken hata oluştu: {str(e)}")
         st.session_state.commentator = None
 
 def format_event(event):
     """Format match event for display"""
-    return f"{event['time']['elapsed']}' - {event['team']['name']}: {event['type']} - {event['player']['name']}"
+    try:
+        return f"{event['time']['elapsed']}' - {event['team']['name']}: {event['type']} - {event['player']['name']}"
+    except KeyError as e:
+        logger.error(f"Error formatting event: {str(e)}")
+        return "Event format error"
 
 def calculate_live_win_probability(stats, score):
     """Calculate live win probability based on current stats and score"""
@@ -77,112 +90,123 @@ def calculate_live_win_probability(stats, score):
 
 def display_match_details(fixture_id, match_info):
     """Display detailed statistics and events for a match"""
-    with st.spinner("Maç detayları yükleniyor..."):
-        # Get match statistics
-        stats = st.session_state.data_handler.get_match_statistics(fixture_id)
-        events = st.session_state.data_handler.get_match_events(fixture_id)
+    try:
+        with st.spinner("Maç detayları yükleniyor..."):
+            # Get match statistics
+            stats = st.session_state.data_handler.get_match_statistics(fixture_id)
+            events = st.session_state.data_handler.get_match_events(fixture_id)
 
-        # Score information
-        score = [match_info['goals']['home'], match_info['goals']['away']]
+            if not stats:
+                logger.warning(f"No statistics available for fixture {fixture_id}")
+                st.warning("Maç istatistikleri şu an için mevcut değil.")
+                return
 
-        # Calculate live win probabilities
-        win_probs = calculate_live_win_probability(stats, score)
+            # Score information
+            score = [match_info['goals']['home'], match_info['goals']['away']]
 
-        # AI Commentary Section
-        if st.session_state.commentator is not None:
-            st.subheader("Maç Yorumu")
-            commentary = st.session_state.commentator.generate_match_commentary(stats, score, events)
-            st.markdown(f"💬 {commentary}")
+            # Calculate live win probabilities
+            win_probs = calculate_live_win_probability(stats, score)
 
-            # Next Goal Prediction
-            st.subheader("Gol Tahmini")
-            next_goal = st.session_state.commentator.predict_next_goal(stats, events)
+            # AI Commentary Section
+            if st.session_state.commentator is not None:
+                st.subheader("Maç Yorumu")
+                commentary = st.session_state.commentator.generate_match_commentary(stats, score, events)
+                st.markdown(f"💬 {commentary}")
 
-            # Display prediction with probability gauge and confidence
-            col1, col2 = st.columns(2)
-            with col1:
-                st.write("**Tahmin:**", next_goal['prediction'])
-                if next_goal['expected_time']:
-                    st.write("**Tahmini Zaman:**", f"{next_goal['expected_time']}. dakika")
-                if 'confidence' in next_goal:
-                    st.write("**Güven Seviyesi:**", next_goal['confidence'].title())
+                # Next Goal Prediction
+                st.subheader("Gol Tahmini")
+                next_goal = st.session_state.commentator.predict_next_goal(stats, events)
 
-            with col2:
-                st.progress(next_goal['probability'], 
-                          text=f"Olasılık: {next_goal['probability']:.1%}")
+                # Display prediction with probability gauge and confidence
+                col1, col2 = st.columns(2)
+                with col1:
+                    st.write("**Tahmin:**", next_goal['prediction'])
+                    if next_goal['expected_time']:
+                        st.write("**Tahmini Zaman:**", f"{next_goal['expected_time']}. dakika")
+                    if 'confidence' in next_goal:
+                        st.write("**Güven Seviyesi:**", next_goal['confidence'].title())
 
-            # Display prediction explanation
-            prediction_explanation = st.session_state.commentator.explain_prediction(win_probs, stats)
-            st.info(f"📊 **Tahmin Açıklaması:** {prediction_explanation}")
+                with col2:
+                    st.progress(next_goal['probability'], 
+                              text=f"Olasılık: {next_goal['probability']:.1%}")
 
-        # Display win probability chart
-        st.subheader("Canlı Kazanma Olasılıkları")
-        st.plotly_chart(create_probability_chart(
-            match_info['teams']['home']['name'],
-            match_info['teams']['away']['name'],
-            win_probs,
-            "Canlı Tahmin"
-        ), use_container_width=True)
+                # Display prediction explanation
+                prediction_explanation = st.session_state.commentator.explain_prediction(win_probs, stats)
+                st.info(f"📊 **Tahmin Açıklaması:** {prediction_explanation}")
 
-        if stats:
-            st.subheader("Maç İstatistikleri")
-            col1, col2 = st.columns(2)
+            # Display win probability chart
+            st.subheader("Canlı Kazanma Olasılıkları")
+            st.plotly_chart(create_probability_chart(
+                match_info['teams']['home']['name'],
+                match_info['teams']['away']['name'],
+                win_probs,
+                "Canlı Tahmin"
+            ), use_container_width=True)
 
-            with col1:
-                st.write(f"**{match_info['teams']['home']['name']}**")
-                for stat in stats[0]['statistics']:
-                    if stat['value'] is not None:
-                        st.metric(
-                            label=stat['type'],
-                            value=stat['value'],
-                            delta=None
-                        )
+            if stats:
+                st.subheader("Maç İstatistikleri")
+                col1, col2 = st.columns(2)
 
-            with col2:
-                st.write(f"**{match_info['teams']['away']['name']}**")
-                for stat in stats[1]['statistics']:
-                    if stat['value'] is not None:
-                        st.metric(
-                            label=stat['type'],
-                            value=stat['value'],
-                            delta=None
-                        )
+                with col1:
+                    st.write(f"**{match_info['teams']['home']['name']}**")
+                    for stat in stats[0]['statistics']:
+                        if stat['value'] is not None:
+                            st.metric(
+                                label=stat['type'],
+                                value=stat['value'],
+                                delta=None
+                            )
 
-            # Performance Analysis
-            st.subheader("Performans Analizi")
+                with col2:
+                    st.write(f"**{match_info['teams']['away']['name']}**")
+                    for stat in stats[1]['statistics']:
+                        if stat['value'] is not None:
+                            st.metric(
+                                label=stat['type'],
+                                value=stat['value'],
+                                delta=None
+                            )
 
-            # Calculate performance metrics
-            home_possession = float(stats[0]['statistics'][9]['value'].strip('%')) if stats[0]['statistics'][9]['value'] else 50
-            home_shots = int(stats[0]['statistics'][2]['value'] or 0)
-            home_attacks = int(stats[0]['statistics'][13]['value'] or 0)
+                # Performance Analysis
+                st.subheader("Performans Analizi")
 
-            away_possession = float(stats[1]['statistics'][9]['value'].strip('%')) if stats[1]['statistics'][9]['value'] else 50
-            away_shots = int(stats[1]['statistics'][2]['value'] or 0)
-            away_attacks = int(stats[1]['statistics'][13]['value'] or 0)
+                # Calculate performance metrics
+                home_possession = float(stats[0]['statistics'][9]['value'].strip('%')) if stats[0]['statistics'][9]['value'] else 50
+                home_shots = int(stats[0]['statistics'][2]['value'] or 0)
+                home_attacks = int(stats[0]['statistics'][13]['value'] or 0)
 
-            # Display performance metrics
-            col1, col2 = st.columns(2)
-            with col1:
-                st.write("**Hücum Etkinliği**")
-                st.progress(home_shots / max(home_shots + away_shots, 1), 
-                          text=f"İsabetli Şut Etkinliği: {home_shots}")
-                st.progress(home_attacks / max(home_attacks + away_attacks, 1),
-                          text=f"Tehlikeli Atak: {home_attacks}")
+                away_possession = float(stats[1]['statistics'][9]['value'].strip('%')) if stats[1]['statistics'][9]['value'] else 50
+                away_shots = int(stats[1]['statistics'][2]['value'] or 0)
+                away_attacks = int(stats[1]['statistics'][13]['value'] or 0)
 
-            with col2:
-                st.write("**Top Kontrolü**")
-                st.progress(home_possession / 100,
-                          text=f"Top Kontrolü: %{home_possession:.1f}")
+                # Display performance metrics
+                col1, col2 = st.columns(2)
+                with col1:
+                    st.write("**Hücum Etkinliği**")
+                    st.progress(home_shots / max(home_shots + away_shots, 1), 
+                              text=f"İsabetli Şut Etkinliği: {home_shots}")
+                    st.progress(home_attacks / max(home_attacks + away_attacks, 1),
+                              text=f"Tehlikeli Atak: {home_attacks}")
 
-        if events:
-            st.subheader("Önemli Olaylar")
-            for event in events:
-                if event['type'] == 'Goal':
-                    st.success(format_event(event))
-                elif event['type'] in ['Card', 'subst']:
-                    st.warning(format_event(event))
-                else:
-                    st.info(format_event(event))
+                with col2:
+                    st.write("**Top Kontrolü**")
+                    st.progress(home_possession / 100,
+                              text=f"Top Kontrolü: %{home_possession:.1f}")
+
+            if events:
+                st.subheader("Önemli Olaylar")
+                for event in events:
+                    if event['type'] == 'Goal':
+                        st.success(format_event(event))
+                    elif event['type'] in ['Card', 'subst']:
+                        st.warning(format_event(event))
+                    else:
+                        st.info(format_event(event))
+
+    except Exception as e:
+        logger.error(f"Error displaying match details: {str(e)}")
+        st.error(f"Maç detayları gösterilirken bir hata oluştu: {str(e)}")
+
 
 st.title("Canlı Maçlar")
 
