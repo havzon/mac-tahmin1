@@ -16,13 +16,20 @@ if 'data_handler' not in st.session_state:
             st.session_state.data_handler = DataHandler(api_key)
             st.session_state.statistical_model = StatisticalModel()
             st.session_state.strategy_advisor = StrategyAdvisor(None)  # Will be updated with data
-            st.session_state.commentator = MatchCommentator()  # Initialize commentator
         else:
             st.error("API anahtarı bulunamadı. Lütfen RAPIDAPI_KEY'i Secrets kısmına ekleyin.")
             st.stop()
     except Exception as e:
         st.error(f"API bağlantısı sırasında hata oluştu: {str(e)}")
         st.stop()
+
+# Initialize commentator separately to handle any potential errors
+if 'commentator' not in st.session_state:
+    try:
+        st.session_state.commentator = MatchCommentator()
+    except Exception as e:
+        st.error(f"Yorumlayıcı başlatılırken hata oluştu: {str(e)}")
+        st.session_state.commentator = None
 
 def format_event(event):
     """Format match event for display"""
@@ -82,9 +89,14 @@ def display_match_details(fixture_id, match_info):
         win_probs = calculate_live_win_probability(stats, score)
 
         # AI Commentary Section
-        st.subheader("Maç Yorumu")
-        commentary = st.session_state.commentator.generate_match_commentary(stats, score, events)
-        st.markdown(f"💬 {commentary}")
+        if st.session_state.commentator is not None:
+            st.subheader("Maç Yorumu")
+            commentary = st.session_state.commentator.generate_match_commentary(stats, score, events)
+            st.markdown(f"💬 {commentary}")
+
+            # Display prediction explanation
+            prediction_explanation = st.session_state.commentator.explain_prediction(win_probs, stats)
+            st.info(f"📊 **Tahmin Açıklaması:** {prediction_explanation}")
 
         # Display win probability chart
         st.subheader("Canlı Kazanma Olasılıkları")
@@ -94,10 +106,6 @@ def display_match_details(fixture_id, match_info):
             win_probs,
             "Canlı Tahmin"
         ), use_container_width=True)
-
-        # Display prediction explanation
-        prediction_explanation = st.session_state.commentator.explain_prediction(win_probs, stats)
-        st.info(f"📊 **Tahmin Açıklaması:** {prediction_explanation}")
 
         if stats:
             st.subheader("Maç İstatistikleri")
