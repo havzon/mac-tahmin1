@@ -180,14 +180,37 @@ if home_team and away_team and analyze_button:
 
         # Display team form comparison
         st.subheader("Takım Form Karşılaştırması")
-        home_form = st.session_state.strategy_advisor.get_team_form(df, home_team)
-        away_form = st.session_state.strategy_advisor.get_team_form(df, away_team)
+        try:
+            home_form = st.session_state.strategy_advisor.get_team_form(df, home_team)
+            away_form = st.session_state.strategy_advisor.get_team_form(df, away_team)
 
-        st.plotly_chart(create_form_chart(
-            home_form,
-            away_form,
-            home_team, away_team
-        ), use_container_width=True)
+            col1, col2 = st.columns(2)
+
+            with col1:
+                st.markdown(f"**{home_team} Son Form**")
+                st.metric("Galibiyet", home_form['wins'])
+                st.metric("Beraberlik", home_form['draws'])
+                st.metric("Mağlubiyet", home_form['losses'])
+                st.metric("Form Skoru", f"{home_form['form_score']:.2%}")
+                st.metric("Seri", home_form['current_streak'])
+
+            with col2:
+                st.markdown(f"**{away_team} Son Form**")
+                st.metric("Galibiyet", away_form['wins'])
+                st.metric("Beraberlik", away_form['draws'])
+                st.metric("Mağlubiyet", away_form['losses'])
+                st.metric("Form Skoru", f"{away_form['form_score']:.2%}")
+                st.metric("Seri", away_form['current_streak'])
+
+            # Form karşılaştırma grafiği
+            st.markdown("### Form Trendi")
+            fig = create_form_chart(home_form, away_form, home_team, away_team)
+            st.plotly_chart(fig, use_container_width=True)
+
+        except Exception as e:
+            st.error(f"Form karşılaştırması yapılırken hata oluştu: {str(e)}")
+            st.write("Detaylı hata bilgisi:", e)
+
 
         # Display historical matches
         st.subheader("Son Karşılaşmalar")

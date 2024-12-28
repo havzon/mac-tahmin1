@@ -1,10 +1,130 @@
 import pandas as pd
 import numpy as np
-from typing import Dict, List, Tuple
+from typing import Dict, List, Tuple, Optional
+import logging
+
+logger = logging.getLogger(__name__)
+logging.basicConfig(level=logging.ERROR)
+
 
 class StrategyAdvisor:
     def __init__(self, historical_data: pd.DataFrame):
         self.data = historical_data
+
+    def get_team_form(self, data: pd.DataFrame, team: str) -> Dict:
+        """Takımın son form durumunu analiz et"""
+        try:
+            # Son 5 maçı al
+            team_matches = data[(data['HomeTeam'] == team) | (data['AwayTeam'] == team)].tail(5)
+
+            if len(team_matches) == 0:
+                return self._create_empty_form()
+
+            form_data = {
+                'wins': 0,
+                'draws': 0,
+                'losses': 0,
+                'goals_scored': [],
+                'goals_conceded': [],
+                'points': [],
+                'form_trend': [],
+                'last_matches': []
+            }
+
+            # Son maçları analiz et
+            for _, match in team_matches.iterrows():
+                is_home = match['HomeTeam'] == team
+                team_goals = match['FTHG'] if is_home else match['FTAG']
+                opponent_goals = match['FTAG'] if is_home else match['FTHG']
+
+                # Gol istatistikleri
+                form_data['goals_scored'].append(float(team_goals))
+                form_data['goals_conceded'].append(float(opponent_goals))
+
+                # Maç sonucu
+                if team_goals > opponent_goals:
+                    form_data['wins'] += 1
+                    form_data['points'].append(3)
+                    form_data['form_trend'].append(1)  # Galibiyet
+                elif team_goals == opponent_goals:
+                    form_data['draws'] += 1
+                    form_data['points'].append(1)
+                    form_data['form_trend'].append(0)  # Beraberlik
+                else:
+                    form_data['losses'] += 1
+                    form_data['points'].append(0)
+                    form_data['form_trend'].append(-1)  # Mağlubiyet
+
+                # Maç detayı
+                form_data['last_matches'].append({
+                    'opponent': match['AwayTeam'] if is_home else match['HomeTeam'],
+                    'score': f"{team_goals}-{opponent_goals}",
+                    'home_away': 'H' if is_home else 'A'
+                })
+
+            # Form metrikleri hesapla
+            form_data.update({
+                'avg_goals_scored': np.mean(form_data['goals_scored']),
+                'avg_goals_conceded': np.mean(form_data['goals_conceded']),
+                'total_points': sum(form_data['points']),
+                'form_score': self._calculate_form_score(form_data['form_trend']),
+                'current_streak': self._calculate_streak(form_data['form_trend'])
+            })
+
+            return form_data
+
+        except Exception as e:
+            logger.error(f"Error calculating team form: {str(e)}")
+            return self._create_empty_form()
+
+    def _create_empty_form(self) -> Dict:
+        """Boş form verisi oluştur"""
+        return {
+            'wins': 0,
+            'draws': 0,
+            'losses': 0,
+            'goals_scored': [],
+            'goals_conceded': [],
+            'points': [],
+            'form_trend': [],
+            'last_matches': [],
+            'avg_goals_scored': 0,
+            'avg_goals_conceded': 0,
+            'total_points': 0,
+            'form_score': 0,
+            'current_streak': 'N/A'
+        }
+
+    def _calculate_form_score(self, trends: List[int]) -> float:
+        """Form skorunu hesapla (0-1 arası)"""
+        if not trends:
+            return 0.0
+
+        # Son maçlara daha fazla ağırlık ver
+        weights = np.array([0.1, 0.15, 0.2, 0.25, 0.3])[:len(trends)]
+        weights = weights / weights.sum()  # Normalize
+
+        # Trend değerlerini 0-1 aralığına dönüştür
+        normalized_trends = [(x + 1) / 2 for x in trends]  # -1->0, 0->0.5, 1->1
+
+        return float(np.sum(weights * normalized_trends))
+
+    def _calculate_streak(self, trends: List[int]) -> str:
+        """Mevcut galibiyet/mağlubiyet serisini hesapla"""
+        if not trends:
+            return 'N/A'
+
+        current = trends[-1]
+        streak = 1
+
+        for i in range(len(trends)-2, -1, -1):
+            if trends[i] == current:
+                streak += 1
+            else:
+                break
+
+        streak_type = 'G' if current == 1 else 'M' if current == -1 else 'B'
+        return f"{streak}{streak_type}"
 
     def analyze_team_style(self, team: str) -> Dict[str, float]:
         """Takımın oyun stilini analiz et"""
