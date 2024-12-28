@@ -259,3 +259,104 @@ class DataHandler:
         except Exception as e:
             logger.error(f"Error fetching team form: {e}")
             return None
+
+    def get_match_stats(self, home_team: str, away_team: str) -> Optional[Dict]:
+        """Takımlar arası maç istatistiklerini getir"""
+        try:
+            # Önce fixture ID'yi bul
+            url = f"{self.base_url}/fixtures"
+            params = {
+                'season': 2023,  # Güncel sezon
+                'status': 'NS',  # Henüz oynanmamış maçlar
+                'teams': f"{home_team}-{away_team}"
+            }
+
+            response = requests.get(url, headers=self.headers, params=params)
+            if response.status_code != 200:
+                return None
+
+            fixtures = response.json().get('response', [])
+            if not fixtures:
+                return None
+
+            fixture_id = fixtures[0]['fixture']['id']
+
+            # Şimdi istatistikleri al
+            stats_url = f"{self.base_url}/fixtures/statistics"
+            stats_params = {'fixture': fixture_id}
+
+            stats_response = requests.get(stats_url, headers=self.headers, params=stats_params)
+            if stats_response.status_code == 200:
+                stats = stats_response.json()['response']
+                return stats
+            return None
+
+        except Exception as e:
+            logger.error(f"Error getting match stats: {e}")
+            return None
+
+    def get_match_events(self, home_team: str, away_team: str) -> Optional[List[Dict]]:
+        """Takımlar arası maç olaylarını getir"""
+        try:
+            # Önce fixture ID'yi bul
+            url = f"{self.base_url}/fixtures"
+            params = {
+                'season': 2023,
+                'status': 'NS',
+                'teams': f"{home_team}-{away_team}"
+            }
+
+            response = requests.get(url, headers=self.headers, params=params)
+            if response.status_code != 200:
+                return None
+
+            fixtures = response.json().get('response', [])
+            if not fixtures:
+                return None
+
+            fixture_id = fixtures[0]['fixture']['id']
+
+            # Events'ları al
+            events_url = f"{self.base_url}/fixtures/events"
+            events_params = {'fixture': fixture_id}
+
+            events_response = requests.get(events_url, headers=self.headers, params=events_params)
+            if events_response.status_code == 200:
+                events = events_response.json()['response']
+                return events
+            return None
+
+        except Exception as e:
+            logger.error(f"Error getting match events: {e}")
+            return None
+
+    def get_historical_data(self, home_team: str, away_team: str) -> Optional[Dict]:
+        """Takımlar arası geçmiş maç verilerini getir"""
+        try:
+            # H2H maçları al
+            url = f"{self.base_url}/fixtures/headtohead"
+            params = {
+                'h2h': f"{home_team}-{away_team}",
+                'last': 10  # Son 10 maç
+            }
+
+            response = requests.get(url, headers=self.headers, params=params)
+            if response.status_code != 200:
+                return None
+
+            h2h_matches = response.json().get('response', [])
+
+            # İstatistikleri topla
+            stats = {
+                'h2h_matches': h2h_matches,
+                'home_wins': sum(1 for match in h2h_matches if match['teams']['home']['winner']),
+                'away_wins': sum(1 for match in h2h_matches if match['teams']['away']['winner']),
+                'draws': sum(1 for match in h2h_matches if not match['teams']['home']['winner'] and not match['teams']['away']['winner']),
+                'average_goals': sum(match['goals']['home'] + match['goals']['away'] for match in h2h_matches) / len(h2h_matches) if h2h_matches else 0
+            }
+
+            return stats
+
+        except Exception as e:
+            logger.error(f"Error getting historical data: {e}")
+            return None

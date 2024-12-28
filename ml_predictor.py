@@ -845,7 +845,7 @@ class MLPredictor:
             time_factors = {
                 'base_range': base_range,
                 'momentum_effect': momentum_effect,
-                ''adjusted_range': (adjusted_min, adjusted_max),
+                'adjusted_range': (adjusted_min, adjusted_max),
                 'current_time': current_time
             }
 

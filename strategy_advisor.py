@@ -219,7 +219,6 @@ class StrategyAdvisor:
             'average_opponent_strength': 0
         }
     
-    #Rest of the original code remains here.
     def analyze_team_style(self, team: str) -> Dict[str, float]:
         """Takımın oyun stilini analiz et"""
         team_matches = self.data[(self.data['HomeTeam'] == team) | (self.data['AwayTeam'] == team)].tail(10)

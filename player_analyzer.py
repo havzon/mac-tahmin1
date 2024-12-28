@@ -23,7 +23,8 @@ class PlayerAnalyzer:
                 'passing_efficiency': self._calculate_passing_metrics(player_stats),
                 'defensive_strength': self._calculate_defensive_metrics(player_stats),
                 'form_trend': self._calculate_form_trend(player_stats),
-                'match_influence': self._calculate_match_influence(player_stats)
+                'match_influence': self._calculate_match_influence(player_stats),
+                'opponent_adjusted_rating': self._calculate_opponent_adjusted_rating(player_stats)
             }
 
             # Oyuncu rolüne göre ağırlıklandırılmış skor
@@ -37,17 +38,41 @@ class PlayerAnalyzer:
             logger.error(f"Error analyzing player performance: {str(e)}")
             return self._create_empty_performance()
 
+    def _calculate_opponent_adjusted_rating(self, stats: Dict) -> float:
+        """Rakip seviyesine göre düzeltilmiş performans hesaplama"""
+        try:
+            base_rating = float(stats.get('games', {}).get('rating', 0) or 0)
+            opponent_strength = float(stats.get('opponent_strength', 0.5) or 0.5)
+
+            # Rakip gücüne göre performansı ağırlıklandır
+            adjusted_rating = base_rating * (1 + (opponent_strength - 0.5))
+
+            return min(1.0, max(0.0, adjusted_rating / 10))  # 0-1 aralığına normalize et
+
+        except Exception as e:
+            logger.error(f"Error calculating opponent adjusted rating: {str(e)}")
+            return 0.0
+
     def _calculate_scoring_ability(self, stats: Dict) -> float:
         """Gol atma yeteneği hesaplama"""
         try:
             goals = float(stats.get('goals', {}).get('total', 0) or 0)
             shots = float(stats.get('shots', {}).get('total', 0) or 1)
             games = float(stats.get('games', {}).get('appearences', 0) or 1)
+            minutes = float(stats.get('games', {}).get('minutes', 0) or 1)
 
             scoring_rate = goals / games if games > 0 else 0
             shot_accuracy = float(stats.get('shots', {}).get('on', 0) or 0) / shots if shots > 0 else 0
-            
-            return (scoring_rate * 0.7 + shot_accuracy * 0.3)
+            minutes_per_goal = minutes / max(goals, 1)
+
+            # Dakika başına gol ve şut isabet oranını hesaba kat
+            weighted_score = (
+                scoring_rate * 0.4 +
+                shot_accuracy * 0.3 +
+                min(1.0, 90 / max(minutes_per_goal, 1)) * 0.3
+            )
+
+            return min(1.0, weighted_score)
 
         except Exception as e:
             logger.error(f"Error calculating scoring ability: {str(e)}")
@@ -101,9 +126,17 @@ class PlayerAnalyzer:
             # Son 5 maçın ağırlıklı ortalaması
             weights = np.array([0.1, 0.15, 0.2, 0.25, 0.3])[:len(recent_ratings)]
             weights = weights / weights.sum()
-            
+
             ratings = np.array(recent_ratings[-5:])
-            return float(np.sum(weights * ratings) / 10)  # 0-1 aralığına normalize et
+            base_trend = float(np.sum(weights * ratings) / 10)  # 0-1 aralığına normalize et
+
+            # Form momentum hesapla
+            if len(ratings) >= 2:
+                momentum = (ratings[-1] - ratings[0]) / len(ratings)
+                momentum_factor = max(-0.2, min(0.2, momentum / 10))  # ±0.2 sınırlama
+                base_trend = max(0.0, min(1.0, base_trend + momentum_factor))
+
+            return base_trend
 
         except Exception as e:
             logger.error(f"Error calculating form trend: {str(e)}")
@@ -116,17 +149,20 @@ class PlayerAnalyzer:
             minutes = float(stats.get('games', {}).get('minutes', 0) or 0)
             goals = float(stats.get('goals', {}).get('total', 0) or 0)
             assists = float(stats.get('goals', {}).get('assists', 0) or 0)
-            yellow_cards = float(stats.get('cards', {}).get('yellow', 0) or 0)
-            red_cards = float(stats.get('cards', {}).get('red', 0) or 0)
+            key_passes = float(stats.get('passes', {}).get('key', 0) or 0)
+            duels_won = float(stats.get('duels', {}).get('won', 0) or 0)
+            duels_total = float(stats.get('duels', {}).get('total', 0) or 1)
 
             minutes_per_game = minutes / games if games > 0 else 0
             goal_involvement = (goals + assists) / games
-            card_penalty = (yellow_cards * 0.1 + red_cards * 0.3) / games
+            key_pass_rate = key_passes / games
+            duel_success = duels_won / duels_total if duels_total > 0 else 0
 
             influence_score = (
-                (minutes_per_game / 90) * 0.3 +
-                goal_involvement * 0.5 -
-                card_penalty * 0.2
+                (minutes_per_game / 90) * 0.2 +
+                goal_involvement * 0.3 +
+                key_pass_rate * 0.2 +
+                duel_success * 0.3
             )
 
             return max(0, min(1, influence_score))
@@ -144,21 +180,24 @@ class PlayerAnalyzer:
                     'passing_efficiency': 0.2,
                     'defensive_strength': 0.1,
                     'form_trend': 0.1,
-                    'match_influence': 0.1
+                    'match_influence': 0.1,
+                    'opponent_adjusted_rating': 0.1
                 },
                 'Midfielder': {
                     'scoring_ability': 0.2,
                     'passing_efficiency': 0.4,
                     'defensive_strength': 0.2,
                     'form_trend': 0.1,
-                    'match_influence': 0.1
+                    'match_influence': 0.1,
+                    'opponent_adjusted_rating': 0.1
                 },
                 'Defender': {
                     'scoring_ability': 0.1,
                     'passing_efficiency': 0.2,
                     'defensive_strength': 0.5,
                     'form_trend': 0.1,
-                    'match_influence': 0.1
+                    'match_influence': 0.1,
+                    'opponent_adjusted_rating': 0.1
                 }
             }
 
@@ -192,6 +231,7 @@ class PlayerAnalyzer:
             'defensive_strength': 0.0,
             'form_trend': 0.0,
             'match_influence': 0.0,
+            'opponent_adjusted_rating': 0.0,
             'overall_rating': 0.0
         }
 
@@ -202,6 +242,10 @@ class PlayerAnalyzer:
                 return "Performans verisi bulunamadı."
 
             rating = performance['overall_rating']
+            form_trend = performance.get('form_trend', 0)
+            opponent_rating = performance.get('opponent_adjusted_rating', 0)
+
+            # Genel durumu belirle
             if rating > 0.8:
                 form = "Çok iyi formda"
             elif rating > 0.6:
@@ -211,7 +255,21 @@ class PlayerAnalyzer:
             else:
                 form = "Form düşüşünde"
 
-            return f"{form} (Rating: {rating:.2f})"
+            # Trend durumunu ekle
+            trend_text = ""
+            if form_trend > 0.6:
+                trend_text = ", yükselen performans"
+            elif form_trend < 0.4:
+                trend_text = ", düşen performans"
+
+            # Rakip seviyesine göre düzeltilmiş değerlendirme
+            opponent_text = ""
+            if opponent_rating > rating + 0.2:
+                opponent_text = " (güçlü rakiplere karşı etkili)"
+            elif opponent_rating < rating - 0.2:
+                opponent_text = " (zayıf rakiplere karşı)"
+
+            return f"{form}{trend_text}{opponent_text} (Rating: {rating:.2f})"
 
         except Exception as e:
             logger.error(f"Error creating performance summary: {str(e)}")
