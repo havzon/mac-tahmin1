@@ -60,8 +60,6 @@ def display_prediction_with_confidence(prediction: Dict):
     col1, col2 = st.columns(2)
     with col1:
         st.write("**Önerilen Tahmin:**", prediction['prediction'])
-        if prediction['expected_time']:
-            st.write("**Tahmini Zaman:**", f"{prediction['expected_time']}. dakika")
         st.write("**Güven Seviyesi:**", prediction['confidence'].title())
 
     with col2:
