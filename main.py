@@ -1,5 +1,6 @@
 import streamlit as st
 import pandas as pd
+import numpy as np
 from data_handler import DataHandler
 from models import PredictionModel, OddsBasedModel, StatisticalModel
 from utils import (create_probability_chart, create_form_chart,
@@ -30,10 +31,22 @@ This system uses multiple analysis methods to predict football match outcomes:
 @st.cache_data
 def load_data():
     try:
-        df = pd.read_csv('attached_assets/oranlar1234.csv')
+        # Read CSV with low_memory=False to handle mixed types
+        df = pd.read_csv('attached_assets/oranlar1234.csv', low_memory=False)
+
+        # Convert score columns to float
+        score_columns = ['FTHG', 'FTAG', 'HTHG', 'HTAG']
+        for col in score_columns:
+            df[col] = pd.to_numeric(df[col], errors='coerce')
+
+        # Convert odds columns to float
+        odds_columns = [col for col in df.columns if any(x in col.upper() for x in ['ODD', 'PROB', 'RATE'])]
+        for col in odds_columns:
+            df[col] = pd.to_numeric(df[col], errors='coerce')
+
         return df
     except Exception as e:
-        st.error(f"Error loading data: {e}")
+        st.error(f"Error loading data: {str(e)}")
         return None
 
 try:
@@ -44,7 +57,7 @@ try:
         st.error("Could not load the dataset. Please check if the file exists and is accessible.")
         st.stop()
 except Exception as e:
-    st.error(f"Error processing data: {e}")
+    st.error(f"Error processing data: {str(e)}")
     st.stop()
 
 # Team selection
@@ -138,7 +151,7 @@ if home_team and away_team:
         st.markdown(create_history_table(df, home_team, away_team), unsafe_allow_html=True)
 
     except Exception as e:
-        st.error(f"Error making predictions: {e}")
+        st.error(f"Error making predictions: {str(e)}")
 
 # Footer
 st.markdown("---")
