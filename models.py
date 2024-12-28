@@ -226,14 +226,44 @@ class PredictionModel:
         xgb_pred = self.xgb_model.predict_proba(features_scaled)[0]
 
         # Tahminleri birleştir (ağırlıklı ortalama)
-        combined_pred = (rf_pred * 0.6 + xgb_pred * 0.4)  # RF modeline daha fazla ağırlık ver
+        combined_pred = (rf_pred * 0.7 + xgb_pred * 0.3)  # RF modeline daha fazla ağırlık ver
 
-        # Ev sahibi avantajını hesaba kat
-        home_advantage = 0.1
+        # Ev sahibi avantajını hesaba kat (azaltılmış)
+        home_advantage = 0.05
         combined_pred[0] += home_advantage  # Ev sahibi kazanma olasılığını artır
-        combined_pred[2] -= home_advantage  # Deplasman kazanma olasılığını azalt
+        combined_pred[2] -= home_advantage * 0.8  # Deplasman kazanma olasılığını azalt
+        combined_pred[1] -= home_advantage * 0.2  # Beraberlik olasılığını çok az azalt
+
+        # Form bazlı düzeltme
+        if features[0][3] > 0.7:  # Ev sahibi çok iyi formda
+            combined_pred[0] *= 1.1
+            combined_pred[2] *= 0.9
+        elif features[0][3] < 0.3:  # Ev sahibi kötü formda
+            combined_pred[0] *= 0.9
+            combined_pred[2] *= 1.1
+
+        if features[0][8] > 0.7:  # Deplasman çok iyi formda
+            combined_pred[2] *= 1.1
+            combined_pred[0] *= 0.9
+        elif features[0][8] < 0.3:  # Deplasman kötü formda
+            combined_pred[2] *= 0.9
+            combined_pred[0] *= 1.1
+
+        # Head-to-head geçmişi bazlı düzeltme
+        h2h_home_win_rate = features[0][-3]
+        h2h_away_win_rate = features[0][-2]
+
+        combined_pred[0] *= (1 + (h2h_home_win_rate - 0.33) * 0.2)
+        combined_pred[2] *= (1 + (h2h_away_win_rate - 0.33) * 0.2)
 
         # Olasılıkları normalize et
+        total = sum(combined_pred)
+        combined_pred = combined_pred / total
+
+        # Minimum ve maksimum sınırları uygula
+        combined_pred = np.clip(combined_pred, 0.15, 0.70)
+
+        # Son normalleştirme
         total = sum(combined_pred)
         combined_pred = combined_pred / total
 
