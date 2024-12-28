@@ -24,6 +24,7 @@ if 'data_handler' not in st.session_state:
             st.session_state.statistical_model = StatisticalModel()
             st.session_state.strategy_advisor = StrategyAdvisor(None)
             st.session_state.performance_analyzer = PerformanceAnalyzer()
+            logger.info("All components initialized successfully")
         else:
             logger.error("API key not found in secrets")
             st.error("API anahtarı bulunamadı. Lütfen RAPIDAPI_KEY'i Secrets kısmına ekleyin.")
@@ -45,8 +46,11 @@ if 'commentator' not in st.session_state:
 
 def display_team_analysis(analysis: Dict, team_type: str):
     """Takım analiz sonuçlarını göster"""
-    metrics = analysis['metrics']
+    if not analysis or 'metrics' not in analysis:
+        st.warning("Takım analizi için yeterli veri yok.")
+        return
 
+    metrics = analysis['metrics']
     st.subheader(f"{'Ev Sahibi' if team_type == 'home' else 'Deplasman'} Takım Analizi")
 
     # Performans skoru
@@ -76,26 +80,31 @@ def display_team_analysis(analysis: Dict, team_type: str):
     col1, col2 = st.columns(2)
     with col1:
         st.write("**Güçlü Yönler**")
-        for strength in analysis['strengths']:
+        for strength in analysis.get('strengths', []):
             st.success(f"✓ {strength}")
 
     with col2:
         st.write("**Geliştirilmesi Gereken Alanlar**")
-        for area in analysis['areas_to_improve']:
+        for area in analysis.get('areas_to_improve', []):
             st.warning(f"⚠ {area}")
 
     # Performans trendi
-    st.write("**Performans Trendi**")
-    for period, score in analysis['trend']['period_scores'].items():
-        period_name = {
-            'first_15': 'İlk 15 dakika',
-            'mid_game': 'Orta bölüm',
-            'last_15': 'Son 15 dakika'
-        }[period]
-        st.progress(score, text=f"{period_name}: {score:.2f}")
+    if 'trend' in analysis and 'period_scores' in analysis['trend']:
+        st.write("**Performans Trendi**")
+        for period, score in analysis['trend']['period_scores'].items():
+            period_name = {
+                'first_15': 'İlk 15 dakika',
+                'mid_game': 'Orta bölüm',
+                'last_15': 'Son 15 dakika'
+            }[period]
+            st.progress(score, text=f"{period_name}: {score:.2f}")
 
 def display_player_analysis(player_stats: Dict):
     """Oyuncu analiz sonuçlarını göster"""
+    if not player_stats:
+        st.warning("Oyuncu analizi için yeterli veri yok.")
+        return
+
     st.subheader("Oyuncu Performans Analizi")
 
     # Oyuncuları performans skorlarına göre sırala
@@ -109,7 +118,7 @@ def display_player_analysis(player_stats: Dict):
         with st.expander(f"{stats['name']} ({stats['team']}) - Puan: {stats['rating']:.1f}/10"):
             st.write(f"**Performans Özeti:** {stats['summary']}")
 
-            if stats['key_moments']:
+            if stats.get('key_moments'):
                 st.write("**Önemli Anlar:**")
                 for moment in stats['key_moments']:
                     st.info(f"{moment['time']}' - {moment['event_type']}")
@@ -134,8 +143,18 @@ def display_match_details(fixture_id, match_info):
             win_probs = calculate_live_win_probability(stats, score)
 
             # Detaylı performans analizi
-            performance_analysis = st.session_state.performance_analyzer.analyze_team_performance(stats, events)
-            player_analysis = st.session_state.performance_analyzer.analyze_player_performance(events)
+            try:
+                if hasattr(st.session_state, 'performance_analyzer'):
+                    performance_analysis = st.session_state.performance_analyzer.analyze_team_performance(stats, events)
+                    player_analysis = st.session_state.performance_analyzer.analyze_player_performance(events)
+                else:
+                    logger.error("Performance analyzer not initialized")
+                    performance_analysis = None
+                    player_analysis = None
+            except Exception as e:
+                logger.error(f"Error in performance analysis: {str(e)}")
+                performance_analysis = None
+                player_analysis = None
 
             # AI Commentary Section
             if st.session_state.commentator is not None:
@@ -161,19 +180,20 @@ def display_match_details(fixture_id, match_info):
                               text=f"Olasılık: {next_goal['probability']:.1%}")
 
             # Takım Performans Analizi
-            st.markdown("---")
-            st.header("Detaylı Performans Analizi")
+            if performance_analysis:
+                st.markdown("---")
+                st.header("Detaylı Performans Analizi")
 
-            tab1, tab2, tab3 = st.tabs(["Ev Sahibi Analizi", "Deplasman Analizi", "Oyuncu Analizi"])
+                tab1, tab2, tab3 = st.tabs(["Ev Sahibi Analizi", "Deplasman Analizi", "Oyuncu Analizi"])
 
-            with tab1:
-                display_team_analysis(performance_analysis['home_team'], 'home')
+                with tab1:
+                    display_team_analysis(performance_analysis['home_team'], 'home')
 
-            with tab2:
-                display_team_analysis(performance_analysis['away_team'], 'away')
+                with tab2:
+                    display_team_analysis(performance_analysis['away_team'], 'away')
 
-            with tab3:
-                display_player_analysis(player_analysis)
+                with tab3:
+                    display_player_analysis(player_analysis)
 
             # Display win probability chart
             st.subheader("Canlı Kazanma Olasılıkları")
@@ -184,6 +204,7 @@ def display_match_details(fixture_id, match_info):
                 "Canlı Tahmin"
             ), use_container_width=True)
 
+            # Display basic statistics
             if stats:
                 st.subheader("Maç İstatistikleri")
                 col1, col2 = st.columns(2)
@@ -208,6 +229,7 @@ def display_match_details(fixture_id, match_info):
                                 delta=None
                             )
 
+            # Display match events
             if events:
                 st.subheader("Önemli Olaylar")
                 for event in events:
@@ -222,7 +244,6 @@ def display_match_details(fixture_id, match_info):
         logger.error(f"Error displaying match details: {str(e)}")
         st.error(f"Maç detayları gösterilirken bir hata oluştu: {str(e)}")
 
-
 def format_event(event):
     """Format match event for display"""
     try:
@@ -233,20 +254,27 @@ def format_event(event):
 
 def calculate_live_win_probability(stats, score):
     """Calculate live win probability based on current stats and score"""
+    if not stats:
+        return [0.33, 0.34, 0.33]  # Default probabilities when no stats available
+
     home_score, away_score = score
 
     # Convert stats to numerical values for analysis
-    home_stats = {
-        'possession': float(stats[0]['statistics'][9]['value'].strip('%')) / 100 if stats else 0.5,
-        'shots_on_target': int(stats[0]['statistics'][2]['value'] or 0) if stats else 0,
-        'dangerous_attacks': int(stats[0]['statistics'][13]['value'] or 0) if stats else 0
-    }
+    try:
+        home_stats = {
+            'possession': float(stats[0]['statistics'][9]['value'].strip('%')) / 100 if stats[0]['statistics'][9]['value'] else 0.5,
+            'shots_on_target': int(stats[0]['statistics'][2]['value'] or 0),
+            'dangerous_attacks': int(stats[0]['statistics'][13]['value'] or 0)
+        }
 
-    away_stats = {
-        'possession': float(stats[1]['statistics'][9]['value'].strip('%')) / 100 if stats else 0.5,
-        'shots_on_target': int(stats[1]['statistics'][2]['value'] or 0) if stats else 0,
-        'dangerous_attacks': int(stats[1]['statistics'][13]['value'] or 0) if stats else 0
-    }
+        away_stats = {
+            'possession': float(stats[1]['statistics'][9]['value'].strip('%')) / 100 if stats[1]['statistics'][9]['value'] else 0.5,
+            'shots_on_target': int(stats[1]['statistics'][2]['value'] or 0),
+            'dangerous_attacks': int(stats[1]['statistics'][13]['value'] or 0)
+        }
+    except (IndexError, KeyError, ValueError) as e:
+        logger.error(f"Error parsing match statistics: {str(e)}")
+        return [0.33, 0.34, 0.33]
 
     # Calculate base probability from score
     score_factor = (home_score - away_score) * 0.15
@@ -271,6 +299,7 @@ def calculate_live_win_probability(stats, score):
 
     return [final_prob, draw_prob, away_prob]
 
+# Main page content
 st.title("Canlı Maçlar")
 
 try:
@@ -295,5 +324,6 @@ try:
         st.experimental_rerun()
 
 except Exception as e:
+    logger.error(f"Error in main page execution: {str(e)}")
     st.error(f"Bir hata oluştu: {str(e)}")
     st.info("Sayfayı yenilemek için F5 tuşuna basın veya sayfayı manuel olarak yenileyin.")
