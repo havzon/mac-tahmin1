@@ -99,18 +99,10 @@ class MatchCommentator:
                     'confidence': 'düşük'
                 }
 
-            home_stats = match_stats[0]['statistics']
-            away_stats = match_stats[1]['statistics']
-
             # İstatistikleri sayısal değerlere dönüştür
             try:
-                home_shots = int(home_stats[2]['value'] or 0)
-                away_shots = int(away_stats[2]['value'] or 0)
-                home_possession = float(home_stats[9]['value'].strip('%')) if home_stats[9]['value'] else 50
-                home_attacks = int(home_stats[13]['value'] or 0)
-                away_attacks = int(away_stats[13]['value'] or 0)
-                home_corners = int(home_stats[6]['value'] or 0)
-                away_corners = int(away_stats[6]['value'] or 0)
+                home_stats = self._extract_team_stats(match_stats[0]['statistics'])
+                away_stats = self._extract_team_stats(match_stats[1]['statistics'])
             except (IndexError, KeyError, ValueError) as e:
                 logger.error(f"Error parsing statistics: {str(e)}")
                 return {
@@ -121,35 +113,10 @@ class MatchCommentator:
                 }
 
             # Gelişmiş momentum hesaplama
-            home_momentum = (
-                home_shots * 0.25 +  # İsabetli şutlar
-                (home_possession / 100) * 0.2 +  # Top kontrolü
-                (home_attacks / max(home_attacks + away_attacks, 1)) * 0.3 +  # Tehlikeli ataklar
-                (home_corners / max(home_corners + away_corners, 1)) * 0.15 +  # Korner etkinliği
-                self._calculate_recent_momentum(events, 'home') * 0.1  # Son dakika momentumu
-            )
+            home_momentum = self._calculate_team_momentum(home_stats, events, match_stats[0]['team']['name'], True)
+            away_momentum = self._calculate_team_momentum(away_stats, events, match_stats[1]['team']['name'], False)
 
-            away_momentum = (
-                away_shots * 0.25 +
-                ((100 - home_possession) / 100) * 0.2 +
-                (away_attacks / max(home_attacks + away_attacks, 1)) * 0.3 +
-                (away_corners / max(home_corners + away_corners, 1)) * 0.15 +
-                self._calculate_recent_momentum(events, 'away') * 0.1
-            )
-
-            # Skor etkisi
-            if events:
-                last_goal = next((event for event in reversed(events) if event['type'] == 'Goal'), None)
-                if last_goal:
-                    team_scored_last = 'home' if last_goal['team']['name'] == match_stats[0]['team']['name'] else 'away'
-                    if team_scored_last == 'home':
-                        home_momentum *= 1.1  # Son golü atan takıma bonus
-                        away_momentum *= 1.15  # Yenik takıma hafif bonus
-                    else:
-                        away_momentum *= 1.1
-                        home_momentum *= 1.15
-
-            # Olasılık normalizasyonu
+            # Momentum normalizasyonu
             total_momentum = home_momentum + away_momentum
             if total_momentum == 0:
                 home_prob = away_prob = 0.5
@@ -157,23 +124,29 @@ class MatchCommentator:
                 home_prob = home_momentum / total_momentum
                 away_prob = away_momentum / total_momentum
 
-            # Tahmini gol zamanı hesaplama
+            # Tahmini gol zamanı
             expected_time = self._predict_next_goal_time(events)
 
+            # Güven seviyesi hesaplama
+            confidence = self._calculate_prediction_confidence(max(home_prob, away_prob), match_stats)
+
             # Tahmin sonucu
-            if home_prob > away_prob and home_prob > 0.55:
+            threshold = 0.55
+            if home_prob > away_prob and home_prob > threshold:
                 return {
                     'prediction': 'Ev sahibi takım gol atabilir',
                     'probability': home_prob,
                     'expected_time': expected_time,
-                    'confidence': self._calculate_prediction_confidence(home_prob, match_stats)
+                    'confidence': confidence,
+                    'details': self._get_prediction_details(home_stats, 'ev sahibi')
                 }
-            elif away_prob > home_prob and away_prob > 0.55:
+            elif away_prob > home_prob and away_prob > threshold:
                 return {
                     'prediction': 'Deplasman takımı gol atabilir',
                     'probability': away_prob,
                     'expected_time': expected_time,
-                    'confidence': self._calculate_prediction_confidence(away_prob, match_stats)
+                    'confidence': confidence,
+                    'details': self._get_prediction_details(away_stats, 'deplasman')
                 }
             else:
                 return {
@@ -192,62 +165,144 @@ class MatchCommentator:
                 'confidence': 'düşük'
             }
 
-    def _calculate_recent_momentum(self, events: List[Dict], team: str) -> float:
+    def _extract_team_stats(self, stats: List[Dict]) -> Dict:
+        """Takım istatistiklerini çıkar ve sayısallaştır"""
+        try:
+            return {
+                'shots': int(stats[2]['value'] or 0),
+                'possession': float(stats[9]['value'].strip('%')) if stats[9]['value'] else 50,
+                'attacks': int(stats[13]['value'] or 0),
+                'corners': int(stats[6]['value'] or 0),
+                'on_target': int(stats[0]['value'] or 0),
+                'blocked_shots': int(stats[1]['value'] or 0),
+                'fouls': int(stats[7]['value'] or 0)
+            }
+        except (IndexError, ValueError) as e:
+            logger.error(f"Error extracting team stats: {str(e)}")
+            return {
+                'shots': 0, 'possession': 50, 'attacks': 0,
+                'corners': 0, 'on_target': 0, 'blocked_shots': 0, 'fouls': 0
+            }
+
+    def _calculate_team_momentum(self, stats: Dict, events: List[Dict], team_name: str, is_home: bool) -> float:
+        """Gelişmiş takım momentumu hesaplama"""
+        try:
+            # Temel istatistik ağırlıkları
+            momentum = (
+                stats['shots'] * 0.15 +  # İsabetli şutlar
+                (stats['possession'] / 100) * 0.15 +  # Top kontrolü
+                (stats['attacks'] / 100) * 0.2 +  # Tehlikeli ataklar
+                (stats['corners'] * 0.1) +  # Kornerler
+                (stats['on_target'] * 0.2) +  # İsabetli şutlar
+                (1 - stats['fouls'] / 20) * 0.1  # Faul etkisi (az faul = pozitif)
+            )
+
+            # Son olayların etkisi
+            recent_momentum = self._calculate_recent_momentum(events, team_name)
+            momentum += recent_momentum * 0.2
+
+            # Ev sahibi avantajı
+            if is_home:
+                momentum *= 1.05
+
+            return max(0.0, min(1.0, momentum))
+
+        except Exception as e:
+            logger.error(f"Error calculating team momentum: {str(e)}")
+            return 0.5
+
+    def _calculate_recent_momentum(self, events: List[Dict], team_name: str) -> float:
         """Son dakikalardaki momentum hesaplama"""
-        if not events:
+        try:
+            if not events:
+                return 0.0
+
+            momentum = 0.0
+            recent_events = events[-5:]  # Son 5 olay
+
+            for event in recent_events:
+                if event['team']['name'] == team_name:
+                    if event['type'] == 'Goal':
+                        momentum += 0.3
+                    elif event['type'] == 'Card':
+                        momentum -= 0.1
+                    elif event['type'] == 'subst':
+                        momentum += 0.05
+                    elif event['type'] == 'Var':
+                        momentum += 0.05
+
+            return min(1.0, max(0.0, momentum))
+
+        except Exception as e:
+            logger.error(f"Error calculating recent momentum: {str(e)}")
             return 0.0
-
-        momentum = 0.0
-        recent_events = events[-5:]  # Son 5 olay
-        for event in recent_events:
-            event_team = 'home' if event['team']['name'] == events[0]['team']['home'] else 'away'
-            if event_team == team:
-                if event['type'] == 'Goal':
-                    momentum += 0.3
-                elif event['type'] == 'Card':
-                    momentum -= 0.1
-                elif event['type'] in ['subst', 'Var']:
-                    momentum += 0.05
-
-        return min(1.0, max(0.0, momentum))
 
     def _predict_next_goal_time(self, events: List[Dict]) -> Optional[int]:
         """Sonraki golün tahmini zamanını hesapla"""
-        if not events:
+        try:
+            if not events:
+                return None
+
+            # Gol aralıklarını hesapla
+            goal_intervals = []
+            prev_goal_time = 0
+            last_goal_time = 0
+
+            for event in events:
+                if event['type'] == 'Goal':
+                    current_time = event['time']['elapsed']
+                    if prev_goal_time > 0:
+                        goal_intervals.append(current_time - prev_goal_time)
+                    prev_goal_time = current_time
+                    last_goal_time = current_time
+
+            # Ortalama gol aralığını hesapla
+            if goal_intervals:
+                avg_interval = sum(goal_intervals) / len(goal_intervals)
+                predicted_time = last_goal_time + max(10, min(30, avg_interval))
+                return min(90, int(predicted_time))
+            else:
+                current_time = events[-1]['time']['elapsed']
+                return min(90, current_time + np.random.randint(15, 25))
+
+        except Exception as e:
+            logger.error(f"Error predicting next goal time: {str(e)}")
             return None
-
-        # Son golün zamanını bul
-        last_goal_time = 0
-        goal_intervals = []
-        prev_goal_time = 0
-
-        for event in events:
-            if event['type'] == 'Goal':
-                current_time = event['time']['elapsed']
-                if prev_goal_time > 0:
-                    goal_intervals.append(current_time - prev_goal_time)
-                prev_goal_time = current_time
-                last_goal_time = current_time
-
-        # Ortalama gol aralığını hesapla
-        if goal_intervals:
-            avg_interval = sum(goal_intervals) / len(goal_intervals)
-            # Tahmini zamanı hesapla ve normalize et
-            predicted_time = last_goal_time + max(10, min(30, avg_interval))
-            return min(90, int(predicted_time))
-        else:
-            # Hiç gol yoksa, maçın durumuna göre tahmin yap
-            current_time = events[-1]['time']['elapsed']
-            return min(90, current_time + np.random.randint(15, 25))
 
     def _calculate_prediction_confidence(self, probability: float, match_stats: Dict) -> str:
         """Tahmin güven seviyesini hesapla"""
-        if probability > 0.7:
-            return 'yüksek'
-        elif probability > 0.6:
-            return 'orta'
-        else:
+        try:
+            if probability > 0.7:
+                return 'yüksek'
+            elif probability > 0.6:
+                return 'orta'
+            else:
+                return 'düşük'
+        except Exception as e:
+            logger.error(f"Error calculating prediction confidence: {str(e)}")
             return 'düşük'
+
+    def _get_prediction_details(self, stats: Dict, team_type: str) -> str:
+        """Tahmin detaylarını açıkla"""
+        try:
+            details = []
+
+            if stats['shots'] > 3:
+                details.append(f"{team_type} takım {stats['shots']} şutla etkili")
+
+            if stats['possession'] > 60:
+                details.append("top kontrolünü elinde tutuyor")
+
+            if stats['attacks'] > 20:
+                details.append("sürekli atak yapıyor")
+
+            if not details:
+                return "Standart oyun akışı devam ediyor"
+
+            return f"{', '.join(details)}."
+        except Exception as e:
+            logger.error(f"Error getting prediction details: {str(e)}")
+            return "Detaylı analiz yapılamadı"
 
     def explain_prediction(self, win_probs: List[float], match_stats: Dict) -> str:
         """Tahmin olasılıklarını açıkla"""
