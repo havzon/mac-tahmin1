@@ -5,7 +5,7 @@ st.set_page_config(page_title="Bildirim Ayarları", layout="wide")
 
 st.title("Bildirim Ayarları")
 st.markdown("""
-Bu sayfada maç bildirimleri için tercihlerinizi ayarlayabilirsiniz.
+Bu sayfada gol bildirimleri için tercihlerinizi ayarlayabilirsiniz.
 Bildirimleri almak için:
 1. Telegram'da botumuzu bulun: [TBD - Bot Link]
 2. Bota /start komutunu gönderin
@@ -15,37 +15,26 @@ Bildirimleri almak için:
 # Notification preferences
 st.subheader("Bildirim Tercihleri")
 
-enable_notifications = st.toggle("Bildirimleri Etkinleştir", value=True)
+enable_notifications = st.toggle("Gol Bildirimlerini Etkinleştir", value=True)
 
 if enable_notifications:
-    st.write("Hangi olaylar için bildirim almak istiyorsunuz?")
-    
-    col1, col2 = st.columns(2)
-    
-    with col1:
-        notify_goals = st.checkbox("Goller", value=True)
-        notify_cards = st.checkbox("Kartlar", value=True)
-        notify_match_start = st.checkbox("Maç Başlangıcı", value=True)
-    
-    with col2:
-        notify_match_end = st.checkbox("Maç Sonu", value=True)
-        notify_injuries = st.checkbox("Sakatlıklar", value=False)
-        notify_substitutions = st.checkbox("Oyuncu Değişiklikleri", value=False)
+    st.write("Hangi durumlarda gol bildirimi almak istiyorsunuz?")
+
+    notify_all_goals = st.checkbox("Tüm Goller", value=True)
+    notify_home_goals = st.checkbox("Sadece Ev Sahibi Golleri", value=False)
+    notify_away_goals = st.checkbox("Sadece Deplasman Golleri", value=False)
 
     # Save preferences
     if st.button("Tercihleri Kaydet"):
         preferences = {
             'enabled': enable_notifications,
             'events': {
-                'goal': notify_goals,
-                'card': notify_cards,
-                'match_start': notify_match_start,
-                'match_end': notify_match_end,
-                'injury': notify_injuries,
-                'substitution': notify_substitutions
+                'all_goals': notify_all_goals,
+                'home_goals': notify_home_goals,
+                'away_goals': notify_away_goals
             }
         }
-        
+
         try:
             # Kullanıcı chat_id'si normalde bot ile etkileşimden gelecek
             # Şimdilik test için sabit bir değer kullanıyoruz
@@ -56,14 +45,14 @@ if enable_notifications:
             st.error(f"Tercihler kaydedilirken hata oluştu: {str(e)}")
 
 else:
-    st.info("Bildirimler devre dışı. Maç güncellemelerini almak için bildirimleri etkinleştirin.")
+    st.info("Bildirimler devre dışı. Gol bildirimlerini almak için bildirimleri etkinleştirin.")
 
 # Bot Kullanım Kılavuzu
 st.markdown("---")
 st.subheader("Bot Komutları")
 st.markdown("""
 - /start - Botu başlat ve kullanım bilgilerini al
-- /subscribe - Bildirimlere abone ol
+- /subscribe - Gol bildirimlerine abone ol
 - /unsubscribe - Bildirim aboneliğini iptal et
 - /preferences - Bildirim tercihlerini görüntüle
 - /help - Yardım menüsünü görüntüle
