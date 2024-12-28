@@ -2,6 +2,7 @@ import os
 from typing import Dict, List, Optional
 import numpy as np
 import logging
+from ml_predictor import MLPredictor
 
 # Configure logging
 logging.basicConfig(level=logging.INFO)
@@ -13,6 +14,7 @@ class MatchCommentator:
         logger.info("Initializing MatchCommentator")
         try:
             self.initialized = True
+            self.ml_predictor = MLPredictor()  # ML tahmin sistemini başlat
             logger.info("MatchCommentator initialized successfully")
         except Exception as e:
             logger.error(f"Error initializing MatchCommentator: {str(e)}")
@@ -112,49 +114,21 @@ class MatchCommentator:
                     'confidence': 'düşük'
                 }
 
-            # Gelişmiş momentum hesaplama
-            home_momentum = self._calculate_team_momentum(home_stats, events, match_stats[0]['team']['name'], True)
-            away_momentum = self._calculate_team_momentum(away_stats, events, match_stats[1]['team']['name'], False)
+            # Kural tabanlı tahmin
+            rule_based_probs = self._calculate_rule_based_prediction(home_stats, away_stats, events, match_stats)
 
-            # Momentum normalizasyonu
-            total_momentum = home_momentum + away_momentum
-            if total_momentum == 0:
-                home_prob = away_prob = 0.5
-            else:
-                home_prob = home_momentum / total_momentum
-                away_prob = away_momentum / total_momentum
+            # ML tabanlı tahmin
+            ml_prediction = self.ml_predictor.predict_goals(match_stats, events)
 
-            # Tahmini gol zamanı
-            expected_time = self._predict_next_goal_time(events)
+            # Tahminleri birleştir
+            combined_prediction = self._combine_predictions(
+                rule_based_probs,
+                ml_prediction,
+                home_stats,
+                away_stats
+            )
 
-            # Güven seviyesi hesaplama
-            confidence = self._calculate_prediction_confidence(max(home_prob, away_prob), match_stats)
-
-            # Tahmin sonucu
-            threshold = 0.55
-            if home_prob > away_prob and home_prob > threshold:
-                return {
-                    'prediction': 'Ev sahibi takım gol atabilir',
-                    'probability': home_prob,
-                    'expected_time': expected_time,
-                    'confidence': confidence,
-                    'details': self._get_prediction_details(home_stats, 'ev sahibi')
-                }
-            elif away_prob > home_prob and away_prob > threshold:
-                return {
-                    'prediction': 'Deplasman takımı gol atabilir',
-                    'probability': away_prob,
-                    'expected_time': expected_time,
-                    'confidence': confidence,
-                    'details': self._get_prediction_details(away_stats, 'deplasman')
-                }
-            else:
-                return {
-                    'prediction': 'Şu an için gol beklentisi düşük',
-                    'probability': max(home_prob, away_prob),
-                    'expected_time': None,
-                    'confidence': 'düşük'
-                }
+            return combined_prediction
 
         except Exception as e:
             logger.error(f"Error predicting next goal: {str(e)}")
@@ -164,6 +138,116 @@ class MatchCommentator:
                 'expected_time': None,
                 'confidence': 'düşük'
             }
+
+    def _calculate_rule_based_prediction(self, home_stats: Dict, away_stats: Dict, 
+                                      events: List[Dict], match_stats: Dict) -> Dict:
+        """Kural tabanlı tahmin hesapla"""
+        try:
+            # Momentum hesaplama
+            home_momentum = self._calculate_team_momentum(home_stats, events, match_stats[0]['team']['name'], True)
+            away_momentum = self._calculate_team_momentum(away_stats, events, match_stats[1]['team']['name'], False)
+
+            # Olasılık normalizasyonu
+            total_momentum = home_momentum + away_momentum
+            if total_momentum == 0:
+                home_prob = away_prob = 0.5
+            else:
+                home_prob = home_momentum / total_momentum
+                away_prob = away_momentum / total_momentum
+
+            return {
+                'home_prob': home_prob,
+                'away_prob': away_prob,
+                'expected_time': self._predict_next_goal_time(events)
+            }
+
+        except Exception as e:
+            logger.error(f"Error in rule-based prediction: {str(e)}")
+            return {'home_prob': 0.5, 'away_prob': 0.5, 'expected_time': None}
+
+    def _combine_predictions(self, rule_based: Dict, ml_pred: Dict, 
+                           home_stats: Dict, away_stats: Dict) -> Dict:
+        """Kural tabanlı ve ML tahminlerini birleştir"""
+        try:
+            # ML tahmin ağırlığı (veri kalitesine göre)
+            ml_weight = 0.6 if ml_pred['confidence'] != 'düşük' else 0.3
+            rule_weight = 1 - ml_weight
+
+            # Birleşik olasılık hesaplama
+            combined_home_prob = (rule_based['home_prob'] * rule_weight + 
+                                ml_pred['goal_probability'] * ml_weight)
+            combined_away_prob = (rule_based['away_prob'] * rule_weight + 
+                                ml_pred['goal_probability'] * ml_weight)
+
+            # En olası sonucu belirle
+            max_prob = max(combined_home_prob, combined_away_prob)
+            threshold = 0.55
+
+            if max_prob > threshold:
+                if combined_home_prob > combined_away_prob:
+                    prediction = 'Ev sahibi takım gol atabilir'
+                    final_prob = combined_home_prob
+                    details = self._get_prediction_details(home_stats, 'ev sahibi')
+                else:
+                    prediction = 'Deplasman takımı gol atabilir'
+                    final_prob = combined_away_prob
+                    details = self._get_prediction_details(away_stats, 'deplasman')
+            else:
+                prediction = 'Şu an için gol beklentisi düşük'
+                final_prob = max_prob
+                details = "Standart oyun akışı devam ediyor"
+
+            # Expected time - ML ve kural tabanlı tahminlerin ortalaması
+            expected_time = rule_based['expected_time']
+            if ml_pred['expected_time']:
+                expected_time = int((expected_time + ml_pred['expected_time']) / 2) if expected_time else ml_pred['expected_time']
+
+            # Confidence level calculation
+            confidence = self._calculate_combined_confidence(rule_based, ml_pred, final_prob)
+
+            return {
+                'prediction': prediction,
+                'probability': final_prob,
+                'expected_time': expected_time,
+                'confidence': confidence,
+                'details': details,
+                'ml_confidence': ml_pred['confidence']
+            }
+
+        except Exception as e:
+            logger.error(f"Error combining predictions: {str(e)}")
+            return {
+                'prediction': 'Tahmin hesaplanırken hata oluştu',
+                'probability': 0.0,
+                'expected_time': None,
+                'confidence': 'düşük'
+            }
+
+    def _calculate_combined_confidence(self, rule_based: Dict, ml_pred: Dict, final_prob: float) -> str:
+        """Birleşik güven seviyesini hesapla"""
+        confidence_score = 0.0
+
+        # ML güven seviyesi katkısı
+        if ml_pred['confidence'] == 'yüksek':
+            confidence_score += 0.4
+        elif ml_pred['confidence'] == 'orta':
+            confidence_score += 0.25
+        else:
+            confidence_score += 0.1
+
+        # Olasılık bazlı katkı
+        confidence_score += final_prob * 0.4
+
+        # Veri kalitesi katkısı
+        if 'data_quality' in ml_pred:
+            confidence_score += ml_pred['data_quality'] * 0.2
+
+        if confidence_score > 0.7:
+            return 'yüksek'
+        elif confidence_score > 0.5:
+            return 'orta'
+        else:
+            return 'düşük'
 
     def _extract_team_stats(self, stats: List[Dict]) -> Dict:
         """Takım istatistiklerini çıkar ve sayısallaştır"""
