@@ -44,6 +44,144 @@ if 'commentator' not in st.session_state:
         st.error(f"Yorumlayıcı başlatılırken hata oluştu: {str(e)}")
         st.session_state.commentator = None
 
+def display_prediction_with_confidence(prediction: Dict):
+    """Gol tahminini güven seviyeleriyle göster"""
+    if not prediction:
+        st.warning("Tahmin verileri bulunamadı.")
+        return
+
+    if 'error' in prediction:
+        st.error(f"Tahmin hatası: {prediction['error']}")
+        return
+
+    st.subheader("Gol Tahmini")
+
+    # Ana tahmin
+    col1, col2 = st.columns(2)
+    with col1:
+        st.write("**Tahmin:**", prediction['prediction'])
+        if prediction['expected_time']:
+            st.write("**Tahmini Zaman:**", f"{prediction['expected_time']}. dakika")
+        st.write("**Güven Seviyesi:**", prediction['confidence'].title())
+
+    with col2:
+        st.progress(prediction['probability'], text=f"Olasılık: {prediction['probability']:.1%}")
+
+    # Momentum ve maç durumu bilgileri
+    if 'momentum' in prediction and 'match_state' in prediction:
+        with st.expander("Detaylı Analiz"):
+            col1, col2 = st.columns(2)
+
+            with col1:
+                st.write("**Maç Durumu**")
+                if 'phase' in prediction['match_state']:
+                    st.write(f"Faz: {prediction['match_state']['phase'].replace('_', ' ').title()}")
+                if 'intensity' in prediction['match_state']:
+                    st.progress(prediction['match_state']['intensity'], 
+                              text=f"Maç Yoğunluğu: {prediction['match_state']['intensity']:.1%}")
+
+            with col2:
+                st.write("**Momentum Analizi**")
+                if 'trend' in prediction['momentum']:
+                    st.write(f"Trend: {prediction['momentum']['trend'].replace('_', ' ').title()}")
+                if 'total' in prediction['momentum']:
+                    st.progress(min(1.0, prediction['momentum']['total']), 
+                              text=f"Toplam Momentum: {min(1.0, prediction['momentum']['total']):.1%}")
+
+def display_match_details(fixture_id, match_info):
+    """Display detailed statistics and events for a match"""
+    try:
+        with st.spinner("Maç detayları yükleniyor..."):
+            # Get match statistics
+            stats = st.session_state.data_handler.get_match_statistics(fixture_id)
+            events = st.session_state.data_handler.get_match_events(fixture_id)
+
+            if not stats:
+                logger.warning(f"No statistics available for fixture {fixture_id}")
+                st.warning("Maç istatistikleri şu an için mevcut değil.")
+                return
+
+            # Score information
+            score = [match_info['goals']['home'], match_info['goals']['away']]
+
+            # AI Commentary Section
+            if st.session_state.commentator is not None:
+                st.subheader("Maç Yorumu")
+                commentary = st.session_state.commentator.generate_match_commentary(stats, score, events)
+                st.markdown(f"💬 {commentary}")
+
+                # Next Goal Prediction
+                next_goal = st.session_state.commentator.predict_next_goal(stats, events)
+                display_prediction_with_confidence(next_goal)
+
+            # Detaylı performans analizi
+            try:
+                if hasattr(st.session_state, 'performance_analyzer'):
+                    performance_analysis = st.session_state.performance_analyzer.analyze_team_performance(stats, events)
+                    player_analysis = st.session_state.performance_analyzer.analyze_player_performance(events)
+
+                    # Takım Performans Analizi
+                    if performance_analysis:
+                        st.markdown("---")
+                        st.header("Detaylı Performans Analizi")
+
+                        tab1, tab2, tab3 = st.tabs(["Ev Sahibi Analizi", "Deplasman Analizi", "Oyuncu Analizi"])
+
+                        with tab1:
+                            display_team_analysis(performance_analysis['home_team'], 'home')
+
+                        with tab2:
+                            display_team_analysis(performance_analysis['away_team'], 'away')
+
+                        with tab3:
+                            display_player_analysis(player_analysis)
+                else:
+                    logger.error("Performance analyzer not initialized")
+                    st.warning("Performans analizi henüz hazır değil.")
+            except Exception as e:
+                logger.error(f"Error in performance analysis: {str(e)}")
+                st.error("Performans analizi sırasında bir hata oluştu.")
+
+            # Display basic statistics
+            if stats:
+                st.subheader("Maç İstatistikleri")
+                col1, col2 = st.columns(2)
+
+                with col1:
+                    st.write(f"**{match_info['teams']['home']['name']}**")
+                    for stat in stats[0]['statistics']:
+                        if stat['value'] is not None:
+                            st.metric(
+                                label=stat['type'],
+                                value=stat['value'],
+                                delta=None
+                            )
+
+                with col2:
+                    st.write(f"**{match_info['teams']['away']['name']}**")
+                    for stat in stats[1]['statistics']:
+                        if stat['value'] is not None:
+                            st.metric(
+                                label=stat['type'],
+                                value=stat['value'],
+                                delta=None
+                            )
+
+            # Display match events
+            if events:
+                st.subheader("Önemli Olaylar")
+                for event in events:
+                    if event['type'] == 'Goal':
+                        st.success(format_event(event))
+                    elif event['type'] in ['Card', 'subst']:
+                        st.warning(format_event(event))
+                    else:
+                        st.info(format_event(event))
+
+    except Exception as e:
+        logger.error(f"Error displaying match details: {str(e)}")
+        st.error(f"Maç detayları gösterilirken bir hata oluştu: {str(e)}")
+
 def display_team_analysis(analysis: Dict, team_type: str):
     """Takım analiz sonuçlarını göster"""
     if not analysis or 'metrics' not in analysis:
@@ -163,21 +301,8 @@ def display_match_details(fixture_id, match_info):
                 st.markdown(f"💬 {commentary}")
 
                 # Next Goal Prediction
-                st.subheader("Gol Tahmini")
                 next_goal = st.session_state.commentator.predict_next_goal(stats, events)
-
-                # Display prediction with probability gauge and confidence
-                col1, col2 = st.columns(2)
-                with col1:
-                    st.write("**Tahmin:**", next_goal['prediction'])
-                    if next_goal['expected_time']:
-                        st.write("**Tahmini Zaman:**", f"{next_goal['expected_time']}. dakika")
-                    if 'confidence' in next_goal:
-                        st.write("**Güven Seviyesi:**", next_goal['confidence'].title())
-
-                with col2:
-                    st.progress(next_goal['probability'], 
-                              text=f"Olasılık: {next_goal['probability']:.1%}")
+                display_prediction_with_confidence(next_goal)
 
             # Takım Performans Analizi
             if performance_analysis:

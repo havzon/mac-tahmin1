@@ -101,34 +101,60 @@ class MatchCommentator:
                     'confidence': 'düşük'
                 }
 
-            # İstatistikleri sayısal değerlere dönüştür
-            try:
-                home_stats = self._extract_team_stats(match_stats[0]['statistics'])
-                away_stats = self._extract_team_stats(match_stats[1]['statistics'])
-            except (IndexError, KeyError, ValueError) as e:
-                logger.error(f"Error parsing statistics: {str(e)}")
+            # ML tabanlı tahmin
+            predictions = self.ml_predictor.predict_goals(match_stats, events)
+
+            if not predictions or 'predictions' not in predictions:
                 return {
-                    'prediction': 'İstatistik verilerinde hata',
+                    'prediction': 'Tahmin hesaplanamadı',
                     'probability': 0.0,
                     'expected_time': None,
                     'confidence': 'düşük'
                 }
 
-            # Kural tabanlı tahmin
-            rule_based_probs = self._calculate_rule_based_prediction(home_stats, away_stats, events, match_stats)
+            # En uygun tahmini seç
+            recommended_level = predictions.get('recommended', 'düşük')
+            selected_prediction = predictions['predictions'].get(recommended_level, {})
 
-            # ML tabanlı tahmin
-            ml_prediction = self.ml_predictor.predict_goals(match_stats, events)
+            if not selected_prediction:
+                return {
+                    'prediction': 'Tahmin seçilemedi',
+                    'probability': 0.0,
+                    'expected_time': None,
+                    'confidence': 'düşük'
+                }
 
-            # Tahminleri birleştir
-            combined_prediction = self._combine_predictions(
-                rule_based_probs,
-                ml_prediction,
-                home_stats,
-                away_stats
-            )
+            # Tahmin detaylarını hazırla
+            probability = selected_prediction.get('probability', 0.0)
+            confidence = selected_prediction.get('confidence', 'düşük')
+            reason = selected_prediction.get('reason', '')
 
-            return combined_prediction
+            # Tahmin açıklamasını oluştur
+            if probability > 0.7:
+                prediction = 'Yüksek gol olasılığı'
+            elif probability > 0.4:
+                prediction = 'Orta seviye gol olasılığı'
+            else:
+                prediction = 'Düşük gol olasılığı'
+
+            # Maç durumu ve momentum bilgilerini ekle
+            match_state = predictions.get('match_state', {})
+            momentum = predictions.get('momentum', {})
+
+            if match_state.get('phase') == 'son_dakikalar':
+                prediction += ' (Maç sonu yaklaşıyor)'
+            elif momentum.get('trend') in ['güçlü_ev_sahibi', 'güçlü_deplasman']:
+                prediction += f" ({momentum['trend'].replace('_', ' ').title()})"
+
+            return {
+                'prediction': prediction,
+                'probability': probability,
+                'expected_time': selected_prediction.get('expected_time'),
+                'confidence': confidence,
+                'reason': reason,
+                'match_state': match_state,
+                'momentum': momentum
+            }
 
         except Exception as e:
             logger.error(f"Error predicting next goal: {str(e)}")
@@ -136,7 +162,8 @@ class MatchCommentator:
                 'prediction': 'Tahmin hesaplanırken hata oluştu',
                 'probability': 0.0,
                 'expected_time': None,
-                'confidence': 'düşük'
+                'confidence': 'düşük',
+                'error': str(e)
             }
 
     def _calculate_rule_based_prediction(self, home_stats: Dict, away_stats: Dict, 
