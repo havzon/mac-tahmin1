@@ -34,7 +34,7 @@ def load_data():
         # Read CSV with low_memory=False to handle mixed types
         df = pd.read_csv('attached_assets/oranlar1234.csv', low_memory=False)
 
-        # Convert score columns to float
+        # Convert score columns to numeric
         score_columns = ['FTHG', 'FTAG', 'HTHG', 'HTAG']
         for col in score_columns:
             df[col] = pd.to_numeric(df[col], errors='coerce')
@@ -47,6 +47,10 @@ def load_data():
         # Fill NaN values with 0 for numeric columns
         numeric_columns = df.select_dtypes(include=[np.number]).columns
         df[numeric_columns] = df[numeric_columns].fillna(0)
+
+        # Ensure team columns are strings
+        df['HomeTeam'] = df['HomeTeam'].astype(str)
+        df['AwayTeam'] = df['AwayTeam'].astype(str)
 
         st.session_state.df_loaded = True
         return df
