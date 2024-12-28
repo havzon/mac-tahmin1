@@ -8,6 +8,10 @@ from utils import create_probability_chart, create_form_chart
 from strategy_advisor import StrategyAdvisor
 from match_commentator import MatchCommentator
 #from performance_analyzer import PerformanceAnalyzer #Removed as per intention
+from simulation_engine import SimulationEngine #Added
+import pandas as pd #Added
+import plotly.express as px #Added
+
 
 # Configure logging
 logging.basicConfig(level=logging.INFO)
@@ -43,6 +47,9 @@ if 'commentator' not in st.session_state:
         logger.error(f"Error initializing commentator: {str(e)}")
         st.error(f"Yorumlayıcı başlatılırken hata oluştu: {str(e)}")
         st.session_state.commentator = None
+
+if 'simulation_engine' not in st.session_state:
+    st.session_state.simulation_engine = SimulationEngine()
 
 def display_prediction_with_confidence(prediction: Dict):
     """Gelişmiş gol tahminini güven seviyeleriyle göster"""
@@ -139,6 +146,7 @@ def display_prediction_with_confidence(prediction: Dict):
                             st.markdown(f"- *{reason}*")
                 else:
                     st.warning(f"Bu güven seviyesinde tahmin bulunmuyor.")
+
 
 
 def display_player_analysis(player_stats: Dict):
@@ -245,6 +253,10 @@ def display_match_details(fixture_id, match_info):
                     else:
                         st.info(format_event(event))
 
+        # Simülasyon arayüzünü ekle
+        st.markdown("---")
+        display_simulation_interface(match_info, fixture_id)
+
     except Exception as e:
         logger.error(f"Error displaying match details: {str(e)}")
         st.error(f"Maç detayları gösterilirken bir hata oluştu: {str(e)}")
@@ -303,6 +315,110 @@ def calculate_live_win_probability(stats, score):
     away_prob = 1 - final_prob - draw_prob
 
     return [final_prob, draw_prob, away_prob]
+
+def display_simulation_interface(match_info: Dict, fixture_id: str):
+    """Tahmin simülasyonu arayüzünü göster"""
+    st.markdown("### 🎮 Tahmin Simülasyonu")
+
+    # Simülasyon ID'sini kontrol et veya oluştur
+    sim_key = f"sim_{fixture_id}"
+    if sim_key not in st.session_state:
+        simulation_id = st.session_state.simulation_engine.create_simulation(
+            fixture_id,
+            {'match_info': match_info}
+        )
+        st.session_state[sim_key] = simulation_id
+
+    simulation_id = st.session_state[sim_key]
+
+    # Tahmin girişi
+    with st.expander("Tahmin Yap", expanded=True):
+        col1, col2, col3 = st.columns(3)
+
+        with col1:
+            home_goals = st.number_input(
+                f"{match_info['teams']['home']['name']} Gol",
+                min_value=0,
+                max_value=10,
+                value=match_info['goals']['home'],
+                key=f"home_goals_{fixture_id}"
+            )
+
+        with col2:
+            away_goals = st.number_input(
+                f"{match_info['teams']['away']['name']} Gol",
+                min_value=0,
+                max_value=10,
+                value=match_info['goals']['away'],
+                key=f"away_goals_{fixture_id}"
+            )
+
+        with col3:
+            confidence = st.slider(
+                "Tahmin Güveniniz",
+                min_value=0.0,
+                max_value=1.0,
+                value=0.5,
+                step=0.1,
+                key=f"confidence_{fixture_id}"
+            )
+
+        # Tahmin türü seçimi
+        prediction_type = st.selectbox(
+            "Tahmin Türü",
+            options=["Maç Sonucu", "Toplam Gol", "İlk Yarı Sonucu"],
+            key=f"pred_type_{fixture_id}"
+        )
+
+        # Tahmin açıklaması
+        prediction_notes = st.text_area(
+            "Tahmin Notlarınız",
+            placeholder="Tahmininizin nedenlerini açıklayın...",
+            key=f"pred_notes_{fixture_id}"
+        )
+
+        if st.button("Tahmini Kaydet", key=f"save_pred_{fixture_id}"):
+            prediction = {
+                'home_goals': home_goals,
+                'away_goals': away_goals,
+                'confidence': confidence,
+                'type': prediction_type,
+                'notes': prediction_notes,
+                'result': home_goals - away_goals  # Basit bir sonuç metriği
+            }
+
+            if st.session_state.simulation_engine.add_prediction(simulation_id, prediction):
+                st.success("Tahmin başarıyla kaydedildi!")
+            else:
+                st.error("Tahmin kaydedilirken bir hata oluştu.")
+
+    # Simülasyon istatistikleri
+    stats = st.session_state.simulation_engine.get_simulation_stats(simulation_id)
+    if stats:
+        st.markdown("### 📊 Simülasyon İstatistikleri")
+
+        col1, col2 = st.columns(2)
+        with col1:
+            st.metric("Toplam Tahmin", stats['total_predictions'])
+
+        with col2:
+            st.metric("Ortalama Güven", f"{stats['average_confidence']:.2%}")
+
+        if stats['prediction_timeline']:
+            # Tahmin zaman çizelgesi
+            df = pd.DataFrame(stats['prediction_timeline'])
+            fig = px.line(df, x='time', y='value',
+                         title="Tahmin Değişim Grafiği",
+                         labels={'time': 'Zaman', 'value': 'Tahmin Değeri'})
+            st.plotly_chart(fig, use_container_width=True, key=f"timeline_{fixture_id}")
+
+    # Öğrenme önerileri
+    suggestions = st.session_state.simulation_engine.get_learning_suggestions(simulation_id)
+    if suggestions:
+        st.markdown("### 💡 Geliştirme Önerileri")
+        for suggestion in suggestions:
+            st.info(suggestion)
+
 
 # Main page content
 st.title("Canlı Maçlar")
