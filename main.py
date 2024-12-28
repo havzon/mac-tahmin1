@@ -154,6 +154,34 @@ if home_team and away_team and analyze_button:
             home_team, away_team, final_pred, "Birleşik Model"
         ), use_container_width=True)
 
+        # Tahmin güvenilirliği analizi
+        st.subheader("Tahmin Güvenilirlik Analizi")
+
+        reliability_analysis = st.session_state.strategy_advisor.analyze_prediction_reliability(
+            home_team, away_team, final_pred
+        )
+
+        # Güvenilirlik skoru için progress bar
+        reliability_score = reliability_analysis.get('reliability_score', 0.5)
+        st.progress(reliability_score, text=f"Güvenilirlik Skoru: {reliability_score:.2%}")
+
+        # Güven ve risk faktörleri için kolonlar
+        col1, col2 = st.columns(2)
+
+        with col1:
+            st.write("**Güven Faktörleri**")
+            for factor in reliability_analysis.get('confidence_factors', []):
+                st.success(f"✓ {factor}")
+
+        with col2:
+            st.write("**Risk Faktörleri**")
+            for factor in reliability_analysis.get('risk_factors', []):
+                st.warning(f"⚠ {factor}")
+
+        # Genel tavsiye
+        st.info(f"💡 **Tavsiye:** {reliability_analysis.get('recommendation', 'Analiz yapılamadı.')}")
+
+
         # Goal prediction
         st.subheader("Gol Tahmini")
         goal_pred = st.session_state.prediction_model.predict_goals(features)
