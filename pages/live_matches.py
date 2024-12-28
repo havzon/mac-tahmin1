@@ -45,7 +45,7 @@ if 'commentator' not in st.session_state:
         st.session_state.commentator = None
 
 def display_prediction_with_confidence(prediction: Dict):
-    """Gol tahminini güven seviyeleriyle göster"""
+    """Gelişmiş gol tahminini güven seviyeleriyle göster"""
     if not prediction:
         st.warning("Tahmin verileri bulunamadı.")
         return

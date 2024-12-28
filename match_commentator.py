@@ -1,5 +1,5 @@
 import os
-from typing import Dict, List, Optional
+from typing import Dict, List, Optional, Tuple
 import numpy as np
 import logging
 from ml_predictor import MLPredictor
@@ -90,252 +90,246 @@ class MatchCommentator:
             return "Maç yorumu oluşturulurken bir hata meydana geldi."
 
     def predict_next_goal(self, match_stats: Dict, events: List[Dict], betting_odds: Optional[Dict] = None) -> Dict:
-        """Bir sonraki golü kimin atacağını tahmin et"""
+        """Gelişmiş gol tahmini - bahis oranları ve birden fazla model entegrasyonu ile"""
         try:
             if not match_stats or len(match_stats) < 2:
                 logger.warning("Insufficient match statistics for prediction")
                 return {
                     'prediction': 'Tahmin için yeterli veri yok',
                     'probability': 0.0,
-                    'expected_time': None,
                     'confidence': 'düşük'
                 }
 
             # ML tabanlı tahmin
-            predictions = self.ml_predictor.predict_goals(match_stats, events)
+            ml_predictions = self.ml_predictor.predict_goals(match_stats, events)
 
-            if not predictions or 'predictions' not in predictions:
-                return {
-                    'prediction': 'Tahmin hesaplanamadı',
-                    'probability': 0.0,
-                    'expected_time': None,
-                    'confidence': 'düşük'
-                }
+            # Kural tabanlı tahmin
+            rule_based_pred = self._calculate_rule_based_prediction(
+                match_stats[0]['statistics'], 
+                match_stats[1]['statistics'],
+                events,
+                match_stats
+            )
 
-            # Bahis oranları varsa tahminleri güncelle
-            if betting_odds:
-                try:
-                    # Bahis oranlarından olasılıkları hesapla
-                    total_prob = sum(1/float(odd) for odd in betting_odds.values())
-                    implied_probs = {k: (1/float(v))/total_prob for k, v in betting_odds.items()}
+            # Bahis oranları analizi
+            odds_analysis = self._analyze_betting_odds(betting_odds) if betting_odds else None
 
-                    # Her güven seviyesi için bahis oranlarını entegre et
-                    for confidence_level in predictions['predictions']:
-                        pred = predictions['predictions'][confidence_level]
+            # Tahminleri birleştir
+            combined_predictions = self._combine_all_predictions(
+                ml_predictions,
+                rule_based_pred,
+                odds_analysis,
+                betting_odds
+            )
 
-                        # Bahis oranı bazlı güncelleme
-                        if 'probability' in pred:
-                            # Bahis oranı ağırlığını güven seviyesine göre ayarla
-                            if confidence_level == 'yüksek':
-                                betting_weight = 0.4
-                            elif confidence_level == 'orta':
-                                betting_weight = 0.3
-                            else:
-                                betting_weight = 0.2
-
-                            ml_weight = 1 - betting_weight
-                            pred['probability'] = (
-                                pred['probability'] * ml_weight + 
-                                implied_probs.get('next_goal', 0.5) * betting_weight
-                            )
-
-                        # Kalite faktörlerini güncelle
-                        if 'quality_factors' not in pred:
-                            pred['quality_factors'] = {}
-
-                        pred['quality_factors'].update({
-                            'betting_confidence': min(1.0, max(0.3, 1/total_prob)),
-                            'odds_consistency': min(1.0, max(0.2, 1 - abs(pred['probability'] - implied_probs.get('next_goal', 0.5)))),
-                            'market_strength': min(1.0, len(betting_odds) / 10)  # Bahis pazarı güçlülüğü
-                        })
-
-                        # Tahmin nedenini güncelle
-                        reasons = []
-                        if pred['probability'] > 0.6:
-                            reasons.append("Yüksek olasılıklı gol beklentisi")
-                        if pred['quality_factors']['betting_confidence'] > 0.7:
-                            reasons.append("Güçlü bahis market göstergeleri")
-                        if pred['quality_factors']['odds_consistency'] > 0.8:
-                            reasons.append("Tutarlı tahmin ve oran verileri")
-
-                        pred['reason'] = " & ".join(reasons) if reasons else "Standart analiz"
-
-                except Exception as e:
-                    logger.error(f"Error processing betting odds: {str(e)}")
-
-            # En uygun tahmini seç
-            recommended_level = predictions.get('recommended', 'düşük')
-            selected_prediction = predictions['predictions'].get(recommended_level, {})
-
-            if not selected_prediction:
-                return {
-                    'prediction': 'Tahmin seçilemedi',
-                    'probability': 0.0,
-                    'expected_time': None,
-                    'confidence': 'düşük'
-                }
-
-            # Tahmin detaylarını hazırla
-            probability = selected_prediction.get('probability', 0.0)
-            confidence = selected_prediction.get('confidence', 'düşük')
-            reason = selected_prediction.get('reason', '')
-
-            # Tahmin açıklamasını oluştur
-            if probability > 0.7:
-                prediction = 'Yüksek gol olasılığı'
-            elif probability > 0.4:
-                prediction = 'Orta seviye gol olasılığı'
-            else:
-                prediction = 'Düşük gol olasılığı'
-
-            # Maç durumu ve momentum bilgilerini ekle
-            match_state = predictions.get('match_state', {})
-            momentum = predictions.get('momentum', {})
-
-            if match_state.get('phase') == 'son_dakikalar':
-                prediction += ' (Maç sonu yaklaşıyor)'
-            elif momentum.get('trend') in ['güçlü_ev_sahibi', 'güçlü_deplasman']:
-                prediction += f" ({momentum['trend'].replace('_', ' ').title()})"
-
-            # Bahis oranları varsa ekle
-            prediction_data = {
-                'prediction': prediction,
-                'probability': probability,
-                'expected_time': selected_prediction.get('expected_time'),
-                'confidence': confidence,
-                'reason': reason,
-                'match_state': match_state,
-                'momentum': momentum,
-                'predictions': predictions['predictions']
-            }
-
-            if betting_odds:
-                prediction_data.update({
-                    'betting_odds': betting_odds,
-                    'implied_probabilities': implied_probs
-                })
-
-            return prediction_data
+            return combined_predictions
 
         except Exception as e:
             logger.error(f"Error predicting next goal: {str(e)}")
             return {
                 'prediction': 'Tahmin hesaplanırken hata oluştu',
                 'probability': 0.0,
-                'expected_time': None,
                 'confidence': 'düşük',
                 'error': str(e)
             }
 
+    def _analyze_betting_odds(self, betting_odds: Dict) -> Dict:
+        """Bahis oranlarından detaylı analiz çıkar"""
+        try:
+            analysis = {}
+
+            # Oranlardan olasılıkları hesapla
+            total_prob = sum(1/float(odd) for odd in betting_odds.values())
+            implied_probs = {k: (1/float(v))/total_prob for k, v in betting_odds.items()}
+
+            # Market güvenilirliği
+            market_efficiency = min(1.0, 1/total_prob)
+            market_depth = min(1.0, len(betting_odds) / 10)
+
+            # Bahis tiplerine göre analiz
+            odds_by_type = {
+                'match_result': {},
+                'goals': {},
+                'first_half': {}
+            }
+
+            for bet_type, odd in betting_odds.items():
+                if bet_type in ['home', 'draw', 'away']:
+                    odds_by_type['match_result'][bet_type] = float(odd)
+                elif bet_type in ['over25', 'under25', 'btts']:
+                    odds_by_type['goals'][bet_type] = float(odd)
+                elif bet_type.startswith('first_half'):
+                    odds_by_type['first_half'][bet_type] = float(odd)
+
+            analysis = {
+                'implied_probabilities': implied_probs,
+                'market_quality': {
+                    'efficiency': market_efficiency,
+                    'depth': market_depth,
+                    'confidence': (market_efficiency + market_depth) / 2
+                },
+                'odds_by_type': odds_by_type
+            }
+
+            return analysis
+
+        except Exception as e:
+            logger.error(f"Error analyzing betting odds: {str(e)}")
+            return {}
+
+    def _combine_all_predictions(self, ml_pred: Dict, rule_pred: Dict, 
+                               odds_analysis: Optional[Dict], betting_odds: Optional[Dict]) -> Dict:
+        """Tüm tahmin kaynaklarını birleştir"""
+        try:
+            predictions = {'predictions': {}}
+            confidence_levels = ['yüksek', 'orta', 'düşük']
+
+            for level in confidence_levels:
+                pred_data = {}
+
+                # ML tahmin ağırlığı
+                ml_weight = 0.5 if level == 'yüksek' else 0.4 if level == 'orta' else 0.3
+
+                # Kural bazlı tahmin ağırlığı
+                rule_weight = 0.3 if level == 'yüksek' else 0.4 if level == 'orta' else 0.4
+
+                # Bahis bazlı tahmin ağırlığı
+                odds_weight = 0.2 if level == 'yüksek' else 0.2 if level == 'orta' else 0.3
+
+                # Temel olasılık hesaplama
+                base_prob = (
+                    ml_pred.get('probability', 0.5) * ml_weight +
+                    rule_pred.get('probability', 0.5) * rule_weight
+                )
+
+                # Bahis oranları varsa entegre et
+                if odds_analysis and betting_odds:
+                    market_prob = odds_analysis['implied_probabilities'].get('next_goal', 0.5)
+                    final_prob = base_prob * (1 - odds_weight) + market_prob * odds_weight
+
+                    # Kalite faktörleri
+                    pred_data['quality_factors'] = {
+                        'ml_confidence': ml_pred.get('confidence_score', 0.5),
+                        'rule_confidence': rule_pred.get('confidence', 0.5),
+                        'betting_confidence': odds_analysis['market_quality']['confidence'],
+                        'odds_consistency': min(1.0, max(0.2, 1 - abs(base_prob - market_prob)))
+                    }
+                else:
+                    final_prob = base_prob
+                    pred_data['quality_factors'] = {
+                        'ml_confidence': ml_pred.get('confidence_score', 0.5),
+                        'rule_confidence': rule_pred.get('confidence', 0.5)
+                    }
+
+                # Tahmin nedenleri
+                reasons = []
+                if final_prob > 0.6:
+                    reasons.append("Yüksek olasılıklı gol beklentisi")
+                if odds_analysis and odds_analysis['market_quality']['confidence'] > 0.7:
+                    reasons.append("Güçlü bahis market göstergeleri")
+                if pred_data['quality_factors'].get('odds_consistency', 0) > 0.8:
+                    reasons.append("Tutarlı tahmin ve oran verileri")
+                if ml_pred.get('confidence_score', 0) > 0.7:
+                    reasons.append("Güçlü ML model tahmini")
+
+                pred_data.update({
+                    'probability': final_prob,
+                    'reason': " & ".join(reasons) if reasons else "Standart analiz"
+                })
+
+                predictions['predictions'][level] = pred_data
+
+            # En yüksek güvenli tahmini seç
+            recommended = max(predictions['predictions'].items(),
+                            key=lambda x: x[1]['probability'] * 
+                                        sum(x[1]['quality_factors'].values()) / len(x[1]['quality_factors']))
+
+            result = {
+                'prediction': self._generate_prediction_text(recommended[1]['probability']),
+                'probability': recommended[1]['probability'],
+                'confidence': recommended[0],
+                'reason': recommended[1]['reason'],
+                'predictions': predictions['predictions']
+            }
+
+            # Bahis oranları varsa ekle
+            if betting_odds:
+                result.update({
+                    'betting_odds': betting_odds,
+                    'implied_probabilities': odds_analysis['implied_probabilities']
+                })
+
+            return result
+
+        except Exception as e:
+            logger.error(f"Error combining predictions: {str(e)}")
+            return {
+                'prediction': 'Tahmin hesaplanamadı',
+                'probability': 0.0,
+                'confidence': 'düşük'
+            }
+
+    def _generate_prediction_text(self, probability: float) -> str:
+        """Olasılığa göre tahmin metni oluştur"""
+        if probability > 0.7:
+            return 'Yüksek gol olasılığı'
+        elif probability > 0.5:
+            return 'Orta seviye gol olasılığı'
+        elif probability > 0.3:
+            return 'Düşük gol olasılığı'
+        else:
+            return 'Gol beklentisi çok düşük'
+
     def _calculate_rule_based_prediction(self, home_stats: Dict, away_stats: Dict, 
-                                      events: List[Dict], match_stats: Dict) -> Dict:
+                                       events: List[Dict], match_stats: Dict) -> Dict:
         """Kural tabanlı tahmin hesapla"""
         try:
             # Momentum hesaplama
             home_momentum = self._calculate_team_momentum(home_stats, events, match_stats[0]['team']['name'], True)
             away_momentum = self._calculate_team_momentum(away_stats, events, match_stats[1]['team']['name'], False)
 
-            # Olasılık normalizasyonu
-            total_momentum = home_momentum + away_momentum
-            if total_momentum == 0:
-                home_prob = away_prob = 0.5
-            else:
-                home_prob = home_momentum / total_momentum
-                away_prob = away_momentum / total_momentum
+            # Son olayların analizi
+            recent_events_impact = self._analyze_recent_events(events)
+
+            # Temel olasılık hesaplama
+            base_prob = (home_momentum + away_momentum) / 2
+
+            # Son olayların etkisini ekle
+            final_prob = base_prob * (1 + recent_events_impact)
+
+            # Güven seviyesi hesaplama
+            confidence = min(1.0, (base_prob + recent_events_impact) / 2)
 
             return {
-                'home_prob': home_prob,
-                'away_prob': away_prob,
-                'expected_time': self._predict_next_goal_time(events)
+                'probability': min(1.0, max(0.0, final_prob)),
+                'confidence': confidence,
+                'momentum': {
+                    'home': home_momentum,
+                    'away': away_momentum
+                }
             }
 
         except Exception as e:
             logger.error(f"Error in rule-based prediction: {str(e)}")
-            return {'home_prob': 0.5, 'away_prob': 0.5, 'expected_time': None}
+            return {'probability': 0.5, 'confidence': 0.3}
 
-    def _combine_predictions(self, rule_based: Dict, ml_pred: Dict, 
-                           home_stats: Dict, away_stats: Dict) -> Dict:
-        """Kural tabanlı ve ML tahminlerini birleştir"""
-        try:
-            # ML tahmin ağırlığı (veri kalitesine göre)
-            ml_weight = 0.6 if ml_pred['confidence'] != 'düşük' else 0.3
-            rule_weight = 1 - ml_weight
+    def _analyze_recent_events(self, events: List[Dict]) -> float:
+        """Son olayların etkisini hesapla"""
+        if not events:
+            return 0.0
 
-            # Birleşik olasılık hesaplama
-            combined_home_prob = (rule_based['home_prob'] * rule_weight + 
-                                ml_pred['goal_probability'] * ml_weight)
-            combined_away_prob = (rule_based['away_prob'] * rule_weight + 
-                                ml_pred['goal_probability'] * ml_weight)
+        impact = 0.0
+        recent_events = events[-5:]  # Son 5 olay
 
-            # En olası sonucu belirle
-            max_prob = max(combined_home_prob, combined_away_prob)
-            threshold = 0.55
+        for event in recent_events:
+            if event['type'] == 'Goal':
+                impact += 0.2
+            elif event['type'] == 'Card':
+                impact += 0.1
+            elif event['type'] == 'subst':
+                impact += 0.05
 
-            if max_prob > threshold:
-                if combined_home_prob > combined_away_prob:
-                    prediction = 'Ev sahibi takım gol atabilir'
-                    final_prob = combined_home_prob
-                    details = self._get_prediction_details(home_stats, 'ev sahibi')
-                else:
-                    prediction = 'Deplasman takımı gol atabilir'
-                    final_prob = combined_away_prob
-                    details = self._get_prediction_details(away_stats, 'deplasman')
-            else:
-                prediction = 'Şu an için gol beklentisi düşük'
-                final_prob = max_prob
-                details = "Standart oyun akışı devam ediyor"
-
-            # Expected time - ML ve kural tabanlı tahminlerin ortalaması
-            expected_time = rule_based['expected_time']
-            if ml_pred['expected_time']:
-                expected_time = int((expected_time + ml_pred['expected_time']) / 2) if expected_time else ml_pred['expected_time']
-
-            # Confidence level calculation
-            confidence = self._calculate_combined_confidence(rule_based, ml_pred, final_prob)
-
-            return {
-                'prediction': prediction,
-                'probability': final_prob,
-                'expected_time': expected_time,
-                'confidence': confidence,
-                'details': details,
-                'ml_confidence': ml_pred['confidence']
-            }
-
-        except Exception as e:
-            logger.error(f"Error combining predictions: {str(e)}")
-            return {
-                'prediction': 'Tahmin hesaplanırken hata oluştu',
-                'probability': 0.0,
-                'expected_time': None,
-                'confidence': 'düşük'
-            }
-
-    def _calculate_combined_confidence(self, rule_based: Dict, ml_pred: Dict, final_prob: float) -> str:
-        """Birleşik güven seviyesini hesapla"""
-        confidence_score = 0.0
-
-        # ML güven seviyesi katkısı
-        if ml_pred['confidence'] == 'yüksek':
-            confidence_score += 0.4
-        elif ml_pred['confidence'] == 'orta':
-            confidence_score += 0.25
-        else:
-            confidence_score += 0.1
-
-        # Olasılık bazlı katkı
-        confidence_score += final_prob * 0.4
-
-        # Veri kalitesi katkısı
-        if 'data_quality' in ml_pred:
-            confidence_score += ml_pred['data_quality'] * 0.2
-
-        if confidence_score > 0.7:
-            return 'yüksek'
-        elif confidence_score > 0.5:
-            return 'orta'
-        else:
-            return 'düşük'
+        return min(0.5, impact)  # Maksimum 0.5 etki
 
     def _extract_team_stats(self, stats: List[Dict]) -> Dict:
         """Takım istatistiklerini çıkar ve sayısallaştır"""
