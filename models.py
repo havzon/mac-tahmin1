@@ -4,39 +4,40 @@ from sklearn.ensemble import RandomForestClassifier
 from sklearn.preprocessing import StandardScaler
 from sklearn.model_selection import train_test_split
 import xgboost as xgb
+import streamlit as st
 
 class PredictionModel:
     def __init__(self):
-        self.rf_model = RandomForestClassifier(n_estimators=100, random_state=42)
-        self.xgb_model = xgb.XGBClassifier(random_state=42)
+        self.rf_model = RandomForestClassifier(n_estimators=50, random_state=42, n_jobs=-1)  # Reduced trees, parallel processing
+        self.xgb_model = xgb.XGBClassifier(random_state=42, n_jobs=-1)  # Parallel processing
         self.scaler = StandardScaler()
-        
+
     def prepare_features(self, df, team1, team2):
         """Prepare features for prediction models"""
         features = []
-        
+
         # Get last 5 matches for each team
         team1_matches = df[(df['HomeTeam'] == team1) | (df['AwayTeam'] == team1)].tail(5)
         team2_matches = df[(df['HomeTeam'] == team2) | (df['AwayTeam'] == team2)].tail(5)
-        
+
         # Calculate form (wins in last 5 matches)
         team1_form = self._calculate_form(team1_matches, team1)
         team2_form = self._calculate_form(team2_matches, team2)
-        
+
         # Calculate average goals scored and conceded
         team1_goals_scored = self._calculate_goals_scored(df, team1)
         team1_goals_conceded = self._calculate_goals_conceded(df, team1)
         team2_goals_scored = self._calculate_goals_scored(df, team2)
         team2_goals_conceded = self._calculate_goals_conceded(df, team2)
-        
+
         features = [
             team1_form, team2_form,
             team1_goals_scored, team1_goals_conceded,
             team2_goals_scored, team2_goals_conceded
         ]
-        
+
         return np.array(features).reshape(1, -1)
-    
+
     def _calculate_form(self, matches, team):
         wins = 0
         for _, match in matches.iterrows():
@@ -44,57 +45,84 @@ class PredictionModel:
                 wins += 1
             elif match['AwayTeam'] == team and match['FTR'] == 'A':
                 wins += 1
-        return wins / 5.0
-    
+        return wins / 5.0 if len(matches) > 0 else 0.0
+
     def _calculate_goals_scored(self, df, team):
         home_goals = df[df['HomeTeam'] == team]['FTHG'].mean()
         away_goals = df[df['AwayTeam'] == team]['FTAG'].mean()
-        return (home_goals + away_goals) / 2
-    
+        return (home_goals + away_goals) / 2 if not np.isnan(home_goals + away_goals) else 0.0
+
     def _calculate_goals_conceded(self, df, team):
         home_conceded = df[df['HomeTeam'] == team]['FTAG'].mean()
         away_conceded = df[df['AwayTeam'] == team]['FTHG'].mean()
-        return (home_conceded + away_conceded) / 2
-    
+        return (home_conceded + away_conceded) / 2 if not np.isnan(home_conceded + away_conceded) else 0.0
+
     def train(self, df):
         """Train both models on historical data"""
         X = []
         y = []
-        
+
+        # Show progress bar
+        total_rows = len(df) - 5
+        progress_bar = st.progress(0)
+        status_text = st.empty()
+
         for i in range(len(df)-5):
+            # Update progress
+            progress = (i + 1) / total_rows
+            progress_bar.progress(progress)
+            status_text.text(f"Processing matches: {i+1}/{total_rows}")
+
             match = df.iloc[i]
-            features = self.prepare_features(df.iloc[:i], match['HomeTeam'], match['AwayTeam'])
-            X.append(features[0])
-            
-            # Convert result to numeric
-            if match['FTR'] == 'H':
-                result = 0
-            elif match['FTR'] == 'D':
-                result = 1
-            else:
-                result = 2
-            y.append(result)
-        
+            try:
+                features = self.prepare_features(df.iloc[:i], match['HomeTeam'], match['AwayTeam'])
+                X.append(features[0])
+
+                # Convert result to numeric
+                if match['FTR'] == 'H':
+                    result = 0
+                elif match['FTR'] == 'D':
+                    result = 1
+                else:
+                    result = 2
+                y.append(result)
+            except Exception as e:
+                st.warning(f"Skipping match due to data issue: {e}")
+                continue
+
         X = np.array(X)
         y = np.array(y)
-        
+
+        # Scale features
+        status_text.text("Scaling features...")
         X = self.scaler.fit_transform(X)
-        
+
+        # Split data
         X_train, X_test, y_train, y_test = train_test_split(X, y, test_size=0.2, random_state=42)
-        
+
+        # Train models
+        status_text.text("Training Random Forest model...")
         self.rf_model.fit(X_train, y_train)
+
+        status_text.text("Training XGBoost model...")
         self.xgb_model.fit(X_train, y_train)
-        
+
+        # Clean up progress indicators
+        progress_bar.empty()
+        status_text.empty()
+
+        st.success("Model training completed!")
+
     def predict(self, features):
         """Make predictions using both models"""
         features_scaled = self.scaler.transform(features)
-        
+
         rf_pred = self.rf_model.predict_proba(features_scaled)[0]
         xgb_pred = self.xgb_model.predict_proba(features_scaled)[0]
-        
+
         # Average predictions from both models
         combined_pred = (rf_pred + xgb_pred) / 2
-        
+
         return combined_pred
 
 class OddsBasedModel:
