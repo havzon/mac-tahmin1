@@ -171,116 +171,12 @@ if home_team and away_team and analyze_button:
         st.info(f"💡 **Tavsiye:** {reliability_analysis.get('recommendation', 'Analiz yapılamadı.')}")
 
 
-        # Goal prediction section
-        st.subheader("⚽ Gol Tahminleri")
-        col1, col2 = st.columns(2)
-
-        with col1:
-            st.markdown("**Maç Sonu Gol Tahminleri**")
-            expected_goals, over_under_probs = st.session_state.statistical_model.predict_goals(df, home_team, away_team)
-
-            st.write(f"Tahmini toplam gol: {expected_goals:.2f}")
-
-            goals_df = pd.DataFrame({
-                'Bahis': ['0.5 Üst', '1.5 Üst', '2.5 Üst', '3.5 Üst'],
-                'Olasılık': [f"{prob:.1%}" for prob in over_under_probs]
-            })
-            st.table(goals_df)
-
-            # Karşılıklı gol tahmini
-            btts_prob = st.session_state.statistical_model.predict_both_teams_to_score(df, home_team, away_team)
-            st.metric("Karşılıklı Gol Olasılığı", f"{btts_prob:.1%}")
-
-        with col2:
-            st.markdown("**İlk Yarı Gol Tahminleri**")
-            first_half_goals, first_half_probs = st.session_state.statistical_model.predict_first_half_goals(df, home_team, away_team)
-
-            st.write(f"Tahmini ilk yarı gol: {first_half_goals:.2f}")
-
-            first_half_df = pd.DataFrame({
-                'Bahis': ['İY 0.5 Üst', 'İY 1.5 Üst'],
-                'Olasılık': [f"{prob:.1%}" for prob in first_half_probs]
-            })
-            st.table(first_half_df)
-
-        # Kart ve Korner tahminleri
-        st.subheader("📊 Kart ve Korner Tahminleri")
-        col1, col2 = st.columns(2)
-
-        with col1:
-            st.markdown("**Kart Tahminleri**")
-            card_predictions = st.session_state.statistical_model.predict_cards(df, home_team, away_team)
-
-            st.metric("Tahmini Toplam Kart", f"{card_predictions['expected_total']:.1f}")
-            st.write(f"3.5 Alt Olasılığı: {card_predictions['under_3.5_cards']:.1%}")
-            st.write(f"3.5 Üst Olasılığı: {card_predictions['over_3.5_cards']:.1%}")
-
-        with col2:
-            st.markdown("**Korner Tahminleri**")
-            corner_predictions = st.session_state.statistical_model.predict_corners(df, home_team, away_team)
-
-            st.metric("Tahmini Toplam Korner", f"{corner_predictions['expected_total']:.1f}")
-            st.write(f"9.5 Alt Olasılığı: {corner_predictions['under_9.5_corners']:.1%}")
-            st.write(f"9.5 Üst Olasılığı: {corner_predictions['over_9.5_corners']:.1%}")
-
-        # Bahis önerisi bölümünü güncelle
-        st.markdown("### 💰 Bahis Önerileri")
-        betting_advice = st.session_state.strategy_advisor.generate_betting_advice(home_form, away_form)
-
-        # Güven skoru göstergesi
-        confidence = betting_advice['confidence_score']
-        st.progress(confidence, text=f"Güven Skoru: {confidence:.1%}")
-
-        # Önerileri düzenli göster
-        col1, col2, col3 = st.columns(3)
-
-        with col1:
-            st.markdown("**Maç Sonucu**")
-            outcome_probs = final_pred
-            best_outcome_idx = np.argmax(outcome_probs)
-            outcomes = ['1', 'X', '2']
-
-            if confidence > 0.6:
-                st.success(f"✅ Önerilen: {outcomes[best_outcome_idx]} ({outcome_probs[best_outcome_idx]:.1%})")
-            else:
-                st.info("⚠️ Yeterince güvenilir tahmin yok")
-
-        with col2:
-            st.markdown("**Gol Bahisleri**")
-            if expected_goals > 2.5 and over_under_probs[2] > 0.6:
-                st.success("✅ 2.5 Üst")
-            elif expected_goals < 2 and (1 - over_under_probs[2]) > 0.6:
-                st.success("✅ 2.5 Alt")
-
-            if btts_prob > 0.65:
-                st.success("✅ KG Var")
-            elif btts_prob < 0.35:
-                st.success("✅ KG Yok")
-
-        with col3:
-            st.markdown("**Diğer**")
-            if first_half_goals > 1.2 and first_half_probs[1] > 0.55:
-                st.success("✅ İY 1.5 Üst")
-            elif first_half_goals < 0.8 and (1 - first_half_probs[0]) > 0.55:
-                st.success("✅ İY 0.5 Alt")
-
-            if card_predictions['expected_total'] > 4:
-                st.success("✅ 3.5 Kart Üst")
-            if corner_predictions['expected_total'] > 10.5:
-                st.success("✅ 9.5 Korner Üst")
-
-        # Risk faktörleri
-        if betting_advice.get('risk_factors'):
-            st.markdown("**⚠️ Risk Faktörleri:**")
-            for factor in betting_advice['risk_factors']:
-                st.warning(factor)
-
-        # Display team form comparison
-        st.subheader("Takım Form Karşılaştırması")
         try:
             home_form = st.session_state.strategy_advisor.get_team_form(df, home_team)
             away_form = st.session_state.strategy_advisor.get_team_form(df, away_team)
 
+            # Display team form comparison
+            st.subheader("Takım Form Karşılaştırması")
             col1, col2 = st.columns(2)
 
             with col1:
@@ -355,40 +251,115 @@ if home_team and away_team and analyze_button:
             fig = create_form_chart(home_form, away_form, home_team, away_team)
             st.plotly_chart(fig, use_container_width=True)
 
-            # Bahis önerisi
-            st.markdown("### 💰 Bahis Önerisi")
+
+            # Bahis önerisi bölümü
+            st.markdown("### 💰 Bahis Önerileri")
             betting_advice = st.session_state.strategy_advisor.generate_betting_advice(home_form, away_form)
 
             # Güven skoru göstergesi
-            st.progress(betting_advice['confidence_score'],
-                       text=f"Güven Skoru: {betting_advice['confidence_score']:.1%}")
+            confidence = betting_advice['confidence_score']
+            st.progress(confidence, text=f"Güven Skoru: {confidence:.1%}")
 
-            # Öneriler
-            if betting_advice['recommendations']:
-                col1, col2 = st.columns(2)
-                with col1:
-                    st.markdown("**Önerilen Bahisler:**")
-                    for rec in betting_advice['recommendations']:
-                        if betting_advice['confidence_score'] > 0.7:
-                            st.success(f"✅ {rec}")
-                        else:
-                            st.info(f"ℹ️ {rec}")
+            # Önerileri düzenli göster
+            col1, col2, col3 = st.columns(3)
 
-                with col2:
-                    st.markdown("**Gerekçeler:**")
-                    for exp in betting_advice['explanations']:
-                        st.write(f"• {exp}")
+            with col1:
+                st.markdown("**Maç Sonucu**")
+                outcome_probs = final_pred
+                best_outcome_idx = np.argmax(outcome_probs)
+                outcomes = ['1', 'X', '2']
 
-                if betting_advice['confidence_score'] > 0.8:
-                    st.success("🎯 Yüksek güvenilirlikli tahmin")
-                elif betting_advice['confidence_score'] > 0.6:
-                    st.info("📊 Orta güvenilirlikli tahmin")
+                if confidence > 0.6:
+                    st.success(f"✅ Önerilen: {outcomes[best_outcome_idx]} ({outcome_probs[best_outcome_idx]:.1%})")
                 else:
-                    st.warning("⚠️ Düşük güvenilirlikli tahmin")
+                    st.info("⚠️ Yeterince güvenilir tahmin yok")
+
+            with col2:
+                st.markdown("**Gol Bahisleri**")
+                if expected_goals > 2.5 and over_under_probs[2] > 0.6:
+                    st.success("✅ 2.5 Üst")
+                elif expected_goals < 2 and (1 - over_under_probs[2]) > 0.6:
+                    st.success("✅ 2.5 Alt")
+
+                if btts_prob > 0.65:
+                    st.success("✅ KG Var")
+                elif btts_prob < 0.35:
+                    st.success("✅ KG Yok")
+
+            with col3:
+                st.markdown("**Diğer**")
+                if first_half_goals > 1.2 and first_half_probs[1] > 0.55:
+                    st.success("✅ İY 1.5 Üst")
+                elif first_half_goals < 0.8 and (1 - first_half_probs[0]) > 0.55:
+                    st.success("✅ İY 0.5 Alt")
+
+                if card_predictions['expected_total'] > 4:
+                    st.success("✅ 3.5 Kart Üst")
+                if corner_predictions['expected_total'] > 10.5:
+                    st.success("✅ 9.5 Korner Üst")
+
+            # Risk faktörleri
+            if betting_advice.get('risk_factors'):
+                st.markdown("**⚠️ Risk Faktörleri:**")
+                for factor in betting_advice['risk_factors']:
+                    st.warning(factor)
 
         except Exception as e:
             st.error(f"Form karşılaştırması yapılırken hata oluştu: {str(e)}")
             st.write("Detaylı hata bilgisi:", e)
+
+        # Goal prediction section
+        st.subheader("⚽ Gol Tahminleri")
+        col1, col2 = st.columns(2)
+
+        with col1:
+            st.markdown("**Maç Sonu Gol Tahminleri**")
+            expected_goals, over_under_probs = st.session_state.statistical_model.predict_goals(df, home_team, away_team)
+
+            st.write(f"Tahmini toplam gol: {expected_goals:.2f}")
+
+            goals_df = pd.DataFrame({
+                'Bahis': ['0.5 Üst', '1.5 Üst', '2.5 Üst', '3.5 Üst'],
+                'Olasılık': [f"{prob:.1%}" for prob in over_under_probs]
+            })
+            st.table(goals_df)
+
+            # Karşılıklı gol tahmini
+            btts_prob = st.session_state.statistical_model.predict_both_teams_to_score(df, home_team, away_team)
+            st.metric("Karşılıklı Gol Olasılığı", f"{btts_prob:.1%}")
+
+        with col2:
+            st.markdown("**İlk Yarı Gol Tahminleri**")
+            first_half_goals, first_half_probs = st.session_state.statistical_model.predict_first_half_goals(df, home_team, away_team)
+
+            st.write(f"Tahmini ilk yarı gol: {first_half_goals:.2f}")
+
+            first_half_df = pd.DataFrame({
+                'Bahis': ['İY 0.5 Üst', 'İY 1.5 Üst'],
+                'Olasılık': [f"{prob:.1%}" for prob in first_half_probs]
+            })
+            st.table(first_half_df)
+
+        # Kart ve Korner tahminleri
+        st.subheader("📊 Kart ve Korner Tahminleri")
+        col1, col2 = st.columns(2)
+
+        with col1:
+            st.markdown("**Kart Tahminleri**")
+            card_predictions = st.session_state.statistical_model.predict_cards(df, home_team, away_team)
+
+            st.metric("Tahmini Toplam Kart", f"{card_predictions['expected_total']:.1f}")
+            st.write(f"3.5 Alt Olasılığı: {card_predictions['under_3.5_cards']:.1%}")
+            st.write(f"3.5 Üst Olasılığı: {card_predictions['over_3.5_cards']:.1%}")
+
+        with col2:
+            st.markdown("**Korner Tahminleri**")
+            corner_predictions = st.session_state.statistical_model.predict_corners(df, home_team, away_team)
+
+            st.metric("Tahmini Toplam Korner", f"{corner_predictions['expected_total']:.1f}")
+            st.write(f"9.5 Alt Olasılığı: {corner_predictions['under_9.5_corners']:.1%}")
+            st.write(f"9.5 Üst Olasılığı: {corner_predictions['over_9.5_corners']:.1%}")
+
 
         # Display historical matches
         st.subheader("Son Karşılaşmalar")
