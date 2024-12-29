@@ -26,26 +26,43 @@ def create_probability_chart(home_team, away_team, probabilities, model_name):
     
     return fig
 
-def create_form_chart(home_stats, away_stats, home_team, away_team):
+def create_form_chart(home_form, away_form, home_team, away_team):
     """Create radar chart comparing team forms"""
     categories = ['Wins', 'Goals Scored', 'Clean Sheets', 'Form', 'Goal Diff']
-    
+
+    # Normalize form values for radar chart
+    home_stats = [
+        home_form['wins'] / 5.0,  # Normalize wins
+        home_form['avg_goals_scored'] / 3.0,  # Normalize goals
+        (5 - home_form['avg_goals_conceded']) / 5.0,  # Clean sheets proxy
+        home_form['form_score'],  # Already normalized
+        (home_form['avg_goals_scored'] - home_form['avg_goals_conceded'] + 2) / 4.0  # Goal diff normalized
+    ]
+
+    away_stats = [
+        away_form['wins'] / 5.0,
+        away_form['avg_goals_scored'] / 3.0,
+        (5 - away_form['avg_goals_conceded']) / 5.0,
+        away_form['form_score'],
+        (away_form['avg_goals_scored'] - away_form['avg_goals_conceded'] + 2) / 4.0
+    ]
+
     fig = go.Figure()
-    
+
     fig.add_trace(go.Scatterpolar(
         r=home_stats,
         theta=categories,
         fill='toself',
         name=home_team
     ))
-    
+
     fig.add_trace(go.Scatterpolar(
         r=away_stats,
         theta=categories,
         fill='toself',
         name=away_team
     ))
-    
+
     fig.update_layout(
         polar=dict(
             radialaxis=dict(
@@ -55,7 +72,7 @@ def create_form_chart(home_stats, away_stats, home_team, away_team):
         showlegend=True,
         title="Team Form Comparison"
     )
-    
+
     return fig
 
 def create_history_table(matches_df, home_team, away_team):
