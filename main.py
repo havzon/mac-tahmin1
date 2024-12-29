@@ -172,8 +172,16 @@ if home_team and away_team and analyze_button:
 
 
         try:
+            # Form verilerini al
             home_form = st.session_state.strategy_advisor.get_team_form(df, home_team)
             away_form = st.session_state.strategy_advisor.get_team_form(df, away_team)
+
+            # Gol tahminlerini hesapla
+            expected_goals, over_under_probs = st.session_state.statistical_model.predict_goals(df, home_team, away_team)
+            btts_prob = st.session_state.statistical_model.predict_both_teams_to_score(df, home_team, away_team)
+            first_half_goals, first_half_probs = st.session_state.statistical_model.predict_first_half_goals(df, home_team, away_team)
+            card_predictions = st.session_state.statistical_model.predict_cards(df, home_team, away_team)
+            corner_predictions = st.session_state.statistical_model.predict_corners(df, home_team, away_team)
 
             # Display team form comparison
             st.subheader("Takım Form Karşılaştırması")
@@ -199,58 +207,8 @@ if home_team and away_team and analyze_button:
 
             # Form karşılaştırma grafiği
             st.markdown("### Form Trendi")
-
-            def create_form_chart(home_form: Dict, away_form: Dict, home_team: str, away_team: str):
-                """Form karşılaştırma grafiği oluştur"""
-                categories = ['Galibiyet', 'Beraberlik', 'Mağlubiyet', 'Gol Ortalaması', 'Form Skoru']
-
-                home_values = [
-                    home_form['wins'],
-                    home_form['draws'],
-                    home_form['losses'],
-                    home_form['avg_goals_scored'],
-                    home_form['form_score']
-                ]
-
-                away_values = [
-                    away_form['wins'],
-                    away_form['draws'],
-                    away_form['losses'],
-                    away_form['avg_goals_scored'],
-                    away_form['form_score']
-                ]
-
-                fig = go.Figure()
-
-                fig.add_trace(go.Scatterpolar(
-                    r=home_values,
-                    theta=categories,
-                    fill='toself',
-                    name=home_team
-                ))
-
-                fig.add_trace(go.Scatterpolar(
-                    r=away_values,
-                    theta=categories,
-                    fill='toself',
-                    name=away_team
-                ))
-
-                fig.update_layout(
-                    polar=dict(
-                        radialaxis=dict(
-                            visible=True,
-                            range=[0, max(max(home_values), max(away_values)) * 1.2]
-                        )),
-                    showlegend=True,
-                    title="Form Karşılaştırması"
-                )
-
-                return fig
-
             fig = create_form_chart(home_form, away_form, home_team, away_team)
             st.plotly_chart(fig, use_container_width=True)
-
 
             # Bahis önerisi bölümü
             st.markdown("### 💰 Bahis Önerileri")
@@ -304,62 +262,50 @@ if home_team and away_team and analyze_button:
                 for factor in betting_advice['risk_factors']:
                     st.warning(factor)
 
+            # Goal prediction section
+            st.subheader("⚽ Gol Tahminleri")
+            col1, col2 = st.columns(2)
+
+            with col1:
+                st.markdown("**Maç Sonu Gol Tahminleri**")
+                st.write(f"Tahmini toplam gol: {expected_goals:.2f}")
+
+                goals_df = pd.DataFrame({
+                    'Bahis': ['0.5 Üst', '1.5 Üst', '2.5 Üst', '3.5 Üst'],
+                    'Olasılık': [f"{prob:.1%}" for prob in over_under_probs]
+                })
+                st.table(goals_df)
+                st.metric("Karşılıklı Gol Olasılığı", f"{btts_prob:.1%}")
+
+            with col2:
+                st.markdown("**İlk Yarı Gol Tahminleri**")
+                st.write(f"Tahmini ilk yarı gol: {first_half_goals:.2f}")
+
+                first_half_df = pd.DataFrame({
+                    'Bahis': ['İY 0.5 Üst', 'İY 1.5 Üst'],
+                    'Olasılık': [f"{prob:.1%}" for prob in first_half_probs]
+                })
+                st.table(first_half_df)
+
+            # Kart ve Korner tahminleri
+            st.subheader("📊 Kart ve Korner Tahminleri")
+            col1, col2 = st.columns(2)
+
+            with col1:
+                st.markdown("**Kart Tahminleri**")
+                st.metric("Tahmini Toplam Kart", f"{card_predictions['expected_total']:.1f}")
+                st.write(f"3.5 Alt Olasılığı: {card_predictions['under_3.5_cards']:.1%}")
+                st.write(f"3.5 Üst Olasılığı: {card_predictions['over_3.5_cards']:.1%}")
+
+            with col2:
+                st.markdown("**Korner Tahminleri**")
+                st.metric("Tahmini Toplam Korner", f"{corner_predictions['expected_total']:.1f}")
+                st.write(f"9.5 Alt Olasılığı: {corner_predictions['under_9.5_corners']:.1%}")
+                st.write(f"9.5 Üst Olasılığı: {corner_predictions['over_9.5_corners']:.1%}")
+
         except Exception as e:
             st.error(f"Form karşılaştırması yapılırken hata oluştu: {str(e)}")
             st.write("Detaylı hata bilgisi:", e)
-
-        # Goal prediction section
-        st.subheader("⚽ Gol Tahminleri")
-        col1, col2 = st.columns(2)
-
-        with col1:
-            st.markdown("**Maç Sonu Gol Tahminleri**")
-            expected_goals, over_under_probs = st.session_state.statistical_model.predict_goals(df, home_team, away_team)
-
-            st.write(f"Tahmini toplam gol: {expected_goals:.2f}")
-
-            goals_df = pd.DataFrame({
-                'Bahis': ['0.5 Üst', '1.5 Üst', '2.5 Üst', '3.5 Üst'],
-                'Olasılık': [f"{prob:.1%}" for prob in over_under_probs]
-            })
-            st.table(goals_df)
-
-            # Karşılıklı gol tahmini
-            btts_prob = st.session_state.statistical_model.predict_both_teams_to_score(df, home_team, away_team)
-            st.metric("Karşılıklı Gol Olasılığı", f"{btts_prob:.1%}")
-
-        with col2:
-            st.markdown("**İlk Yarı Gol Tahminleri**")
-            first_half_goals, first_half_probs = st.session_state.statistical_model.predict_first_half_goals(df, home_team, away_team)
-
-            st.write(f"Tahmini ilk yarı gol: {first_half_goals:.2f}")
-
-            first_half_df = pd.DataFrame({
-                'Bahis': ['İY 0.5 Üst', 'İY 1.5 Üst'],
-                'Olasılık': [f"{prob:.1%}" for prob in first_half_probs]
-            })
-            st.table(first_half_df)
-
-        # Kart ve Korner tahminleri
-        st.subheader("📊 Kart ve Korner Tahminleri")
-        col1, col2 = st.columns(2)
-
-        with col1:
-            st.markdown("**Kart Tahminleri**")
-            card_predictions = st.session_state.statistical_model.predict_cards(df, home_team, away_team)
-
-            st.metric("Tahmini Toplam Kart", f"{card_predictions['expected_total']:.1f}")
-            st.write(f"3.5 Alt Olasılığı: {card_predictions['under_3.5_cards']:.1%}")
-            st.write(f"3.5 Üst Olasılığı: {card_predictions['over_3.5_cards']:.1%}")
-
-        with col2:
-            st.markdown("**Korner Tahminleri**")
-            corner_predictions = st.session_state.statistical_model.predict_corners(df, home_team, away_team)
-
-            st.metric("Tahmini Toplam Korner", f"{corner_predictions['expected_total']:.1f}")
-            st.write(f"9.5 Alt Olasılığı: {corner_predictions['under_9.5_corners']:.1%}")
-            st.write(f"9.5 Üst Olasılığı: {corner_predictions['over_9.5_corners']:.1%}")
-
 
         # Display historical matches
         st.subheader("Son Karşılaşmalar")
