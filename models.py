@@ -1,5 +1,6 @@
 import pandas as pd
 import numpy as np
+import math
 from typing import List, Dict, Tuple
 
 class StatisticalModel:
@@ -79,7 +80,7 @@ class StatisticalModel:
         # Calculate over/under probabilities using Poisson distribution
         probs = []
         for line in [0.5, 1.5, 2.5, 3.5]:
-            over_prob = 1 - np.exp(-total_expected_goals) * sum([(total_expected_goals**k) / np.math.factorial(k) for k in range(int(line)+1)])
+            over_prob = 1 - np.exp(-total_expected_goals) * sum([(total_expected_goals**k) / math.factorial(k) for k in range(int(line)+1)])
             probs.append(over_prob)
 
         return total_expected_goals, probs
@@ -98,7 +99,7 @@ class StatisticalModel:
         # İlk yarı üst/alt olasılıkları
         probs = []
         for line in [0.5, 1.5]:
-            over_prob = 1 - np.exp(-expected_first_half_goals) * sum([(expected_first_half_goals**k) / np.math.factorial(k) for k in range(int(line)+1)])
+            over_prob = 1 - np.exp(-expected_first_half_goals) * sum([(expected_first_half_goals**k) / math.factorial(k) for k in range(int(line)+1)])
             probs.append(over_prob)
 
         return expected_first_half_goals, probs
