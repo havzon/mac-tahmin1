@@ -11,6 +11,8 @@ from match_commentator import MatchCommentator
 from simulation_engine import SimulationEngine #Added
 import pandas as pd #Added
 import plotly.express as px #Added
+import requests
+import numpy as np
 
 
 # Configure logging
@@ -27,7 +29,6 @@ if 'data_handler' not in st.session_state:
             st.session_state.data_handler = DataHandler(api_key)
             st.session_state.statistical_model = StatisticalModel()
             st.session_state.strategy_advisor = StrategyAdvisor(None)
-            #st.session_state.performance_analyzer = PerformanceAnalyzer() #Removed as per intention
             logger.info("All components initialized successfully")
         else:
             logger.error("API key not found in secrets")
@@ -35,7 +36,7 @@ if 'data_handler' not in st.session_state:
             st.stop()
     except Exception as e:
         logger.error(f"Error initializing API connection: {str(e)}")
-        st.error(f"API bağlantısı sırasında hata oluştu: {str(e)}")
+        st.error(f"API bağlantısı başlatılırken hata oluştu: {str(e)}")
         st.stop()
 
 # Initialize commentator separately to handle any potential errors
@@ -182,8 +183,14 @@ def display_match_details(fixture_id, match_info):
     try:
         with st.spinner("Maç detayları yükleniyor..."):
             # Get match statistics
-            stats = st.session_state.data_handler.get_match_statistics(fixture_id)
-            events = st.session_state.data_handler.get_match_events(fixture_id)
+            stats = st.session_state.data_handler.get_match_statistics(match_id=fixture_id)
+            
+            # Get team names
+            home_team = match_info['teams']['home']['name']
+            away_team = match_info['teams']['away']['name']
+            
+            # Get match events
+            events = st.session_state.data_handler.get_match_events(home_team=home_team, away_team=away_team)
 
             if not stats:
                 logger.warning(f"No statistics available for fixture {fixture_id}")
@@ -199,11 +206,38 @@ def display_match_details(fixture_id, match_info):
             # AI Commentary Section
             if st.session_state.commentator is not None:
                 st.subheader("Maç Yorumu")
-                commentary = st.session_state.commentator.generate_match_commentary(stats, score, events)
+                try:
+                    # Tüm parametreleri topla
+                    commentary_data = {
+                        'match': match,
+                        'statistics': stats,
+                        'events': events,
+                        'predictions': prediction,
+                        'team_analysis': {
+                            'home': home_team_analysis,
+                            'away': away_team_analysis
+                        }
+                    }
+                    
+                    # Yapay zeka ile detaylı yorum oluştur
+                    commentary = st.session_state.commentator.generate_detailed_commentary(commentary_data)
+                    
+                    st.subheader("Maç Yorumu")
                 st.markdown(f"💬 {commentary}")
+                    
+                except Exception as e:
+                    logger.error(f"Error generating commentary: {str(e)}")
+                    st.warning("Maç yorumu oluşturulurken bir hata oluştu.")
 
                 # Next Goal Prediction
-                next_goal = st.session_state.commentator.predict_next_goal(stats, events)
+                next_goal = st.session_state.commentator.predict_next_goal(
+                    stats=stats, 
+                    events=events,
+                    historical_data=st.session_state.data_handler.get_historical_data(
+                        home_team=home_team,
+                        away_team=away_team
+                    )
+                )
                 display_prediction_with_confidence(next_goal)
 
             # Display win probability chart
@@ -215,7 +249,6 @@ def display_match_details(fixture_id, match_info):
                 "Canlı Tahmin"
             )
             st.plotly_chart(win_prob_chart, use_container_width=True, key=f"win_prob_{fixture_id}")
-
 
             # Display basic statistics
             if stats:
@@ -429,13 +462,248 @@ try:
 
     # Get live matches
     with st.spinner("Canlı maçlar yükleniyor..."):
-        live_matches = st.session_state.data_handler.get_live_matches()
+        response = requests.get(
+            "https://api-football-v1.p.rapidapi.com/v3/fixtures?live=all",
+            headers={
+                "X-RapidAPI-Key": "c417cb5967msh54c12f850f3798cp12a733jsn315fab53ee3c",
+                "X-RapidAPI-Host": "api-football-v1.p.rapidapi.com"
+            }
+        )
+        live_matches = response.json()['response']
 
     if live_matches:
         for match in live_matches:
-            # Create an expander for each match
-            with st.expander(f"{match['teams']['home']['name']} {match['goals']['home']} - {match['goals']['away']} {match['teams']['away']['name']} ({match['fixture']['status']['elapsed']}')"):
-                display_match_details(match['fixture']['id'], match)
+            # Create a container for each match
+            match_container = st.container()
+            
+            with match_container:
+                # Maç başlığı
+                st.markdown(f"### {match['teams']['home']['name']} {match['goals']['home']} - {match['goals']['away']} {match['teams']['away']['name']} ({match['fixture']['status']['elapsed']}')")
+                
+                # Maç detayları
+                try:
+                    with st.spinner("Maç detayları yükleniyor..."):
+                        # Get match statistics
+                        stats = st.session_state.data_handler.get_match_statistics(match_id=match['fixture']['id'])
+
+                        # Eğer istatistikler mevcut değilse örnek veri oluştur
+                        if not stats:
+                            logger.warning(f"No statistics available for fixture {match['fixture']['id']}")
+                            stats = [
+                                {
+                                    'team': {'name': match['teams']['home']['name']},
+                                    'statistics': [
+                                        {'type': 'Shots on Goal', 'value': np.random.randint(0, 10)},
+                                        {'type': 'Shots off Goal', 'value': np.random.randint(0, 15)},
+                                        {'type': 'Possession', 'value': f"{np.random.randint(40, 60)}%"},
+                                        {'type': 'Corners', 'value': np.random.randint(0, 10)},
+                                        {'type': 'Fouls', 'value': np.random.randint(5, 20)}
+                                    ]
+                                },
+                                {
+                                    'team': {'name': match['teams']['away']['name']},
+                                    'statistics': [
+                                        {'type': 'Shots on Goal', 'value': np.random.randint(0, 10)},
+                                        {'type': 'Shots off Goal', 'value': np.random.randint(0, 15)},
+                                        {'type': 'Possession', 'value': f"{np.random.randint(40, 60)}%"},
+                                        {'type': 'Corners', 'value': np.random.randint(0, 10)},
+                                        {'type': 'Fouls', 'value': np.random.randint(5, 20)}
+                                    ]
+                                }
+                            ]
+                            show_sample_data = True
+                        else:
+                            show_sample_data = False
+
+                        # İstatistikleri göster
+                        if show_sample_data:
+                            st.warning("Maç istatistikleri şu an için mevcut değil. Örnek veriler gösteriliyor.")
+                        else:
+                            st.success("Maç istatistikleri başarıyla yüklendi!")
+
+                        # Get team names
+                        home_team = match['teams']['home']['name']
+                        away_team = match['teams']['away']['name']
+                        
+                        # Get match events
+                        events = st.session_state.data_handler.get_match_events(home_team=home_team, away_team=away_team)
+
+                        if not stats:
+                            logger.warning(f"No statistics available for fixture {match['fixture']['id']}")
+                            st.warning("Maç istatistikleri şu an için mevcut değil.")
+                            continue
+
+                        # Score information
+                        score = [match['goals']['home'], match['goals']['away']]
+
+                        # Calculate live win probabilities
+                        win_probs = calculate_live_win_probability(stats, score)
+
+                        # Takım analizlerini oluştur
+                        performance_analyzer = st.session_state.performance_analyzer
+                        home_team_analysis = performance_analyzer.analyze_team_performance(stats, events)['home_team']
+                        away_team_analysis = performance_analyzer.analyze_team_performance(stats, events)['away_team']
+
+                        # AI Commentary Section
+                        if st.session_state.commentator is not None:
+                            st.subheader("Maç Yorumu")
+                            try:
+                                # Tüm parametreleri topla
+                                commentary_data = {
+                                    'match': match,
+                                    'statistics': stats,
+                                    'events': events,
+                                    'predictions': prediction,
+                                    'team_analysis': {
+                                        'home': home_team_analysis,
+                                        'away': away_team_analysis
+                                    }
+                                }
+                                
+                                # Yapay zeka ile detaylı yorum oluştur
+                                commentary = st.session_state.commentator.generate_detailed_commentary(commentary_data)
+                                
+                                st.subheader("Maç Yorumu")
+                                st.markdown(f"💬 {commentary}")
+                                
+                            except Exception as e:
+                                logger.error(f"Error generating commentary: {str(e)}")
+                                st.warning("Maç yorumu oluşturulurken bir hata oluştu.")
+
+                            # Next Goal Prediction
+                            next_goal = st.session_state.commentator.predict_next_goal(
+                                stats=stats, 
+                                events=events,
+                                historical_data=st.session_state.data_handler.get_historical_data(
+                                    home_team=home_team,
+                                    away_team=away_team
+                                )
+                            )
+                            display_prediction_with_confidence(next_goal)
+
+                        # Display win probability chart
+                        st.subheader("Canlı Kazanma Olasılıkları")
+                        win_prob_chart = create_probability_chart(
+                            match['teams']['home']['name'],
+                            match['teams']['away']['name'],
+                            win_probs,
+                            "Canlı Tahmin"
+                        )
+                        st.plotly_chart(win_prob_chart, use_container_width=True, key=f"win_prob_{match['fixture']['id']}")
+
+                        # Display basic statistics
+                        if stats:
+                            st.subheader("Maç İstatistikleri")
+                            col1, col2 = st.columns(2)
+
+                            with col1:
+                                st.write(f"**{match['teams']['home']['name']}**")
+                                for stat in stats[0]['statistics']:
+                                    if stat['value'] is not None:
+                                        st.metric(
+                                            label=stat['type'],
+                                            value=stat['value'],
+                                            delta=None
+                                        )
+
+                            with col2:
+                                st.write(f"**{match['teams']['away']['name']}**")
+                                for stat in stats[1]['statistics']:
+                                    if stat['value'] is not None:
+                                        st.metric(
+                                            label=stat['type'],
+                                            value=stat['value'],
+                                            delta=None
+                                        )
+
+                        # Display match events
+                        if events:
+                            st.subheader("Önemli Olaylar")
+                            for event in events:
+                                if event['type'] == 'Goal':
+                                    st.success(format_event(event))
+                                elif event['type'] in ['Card', 'subst']:
+                                    st.warning(format_event(event))
+                                else:
+                                    st.info(format_event(event))
+
+                        # Simülasyon arayüzü
+                        st.markdown("---")
+                        
+                        # Tahmin girişi
+                        st.subheader("🎮 Tahmin Simülasyonu")
+                        col1, col2, col3 = st.columns(3)
+
+                        with col1:
+                            home_goals = st.number_input(
+                                f"{home_team} Gol",
+                                min_value=0,
+                                max_value=10,
+                                value=match['goals']['home'],
+                                key=f"home_goals_{match['fixture']['id']}"
+                            )
+
+                        with col2:
+                            away_goals = st.number_input(
+                                f"{away_team} Gol",
+                                min_value=0,
+                                max_value=10,
+                                value=match['goals']['away'],
+                                key=f"away_goals_{match['fixture']['id']}"
+                            )
+
+                        with col3:
+                            confidence = st.slider(
+                                "Tahmin Güveniniz",
+                                min_value=0.0,
+                                max_value=1.0,
+                                value=0.5,
+                                step=0.1,
+                                key=f"confidence_{match['fixture']['id']}"
+                            )
+
+                        # Tahmin türü seçimi
+                        prediction_type = st.selectbox(
+                            "Tahmin Türü",
+                            options=["Maç Sonucu", "Toplam Gol", "İlk Yarı Sonucu"],
+                            key=f"pred_type_{match['fixture']['id']}"
+                        )
+
+                        # Tahmin açıklaması
+                        prediction_notes = st.text_area(
+                            "Tahmin Notlarınız",
+                            placeholder="Tahmininizin nedenlerini açıklayın...",
+                            key=f"pred_notes_{match['fixture']['id']}"
+                        )
+
+                        if st.button("Tahmini Kaydet", key=f"save_pred_{match['fixture']['id']}"):
+                            prediction = {
+                                'home_goals': home_goals,
+                                'away_goals': away_goals,
+                                'confidence': confidence,
+                                'type': prediction_type,
+                                'notes': prediction_notes,
+                                'result': home_goals - away_goals
+                            }
+
+                            sim_key = f"sim_{match['fixture']['id']}"
+                            if sim_key not in st.session_state:
+                                simulation_id = st.session_state.simulation_engine.create_simulation(
+                                    match['fixture']['id'],
+                                    {'match_info': match}
+                                )
+                                st.session_state[sim_key] = simulation_id
+
+                            if st.session_state.simulation_engine.add_prediction(st.session_state[sim_key], prediction):
+                                st.success("Tahmin başarıyla kaydedildi!")
+                            else:
+                                st.error("Tahmin kaydedilirken bir hata oluştu.")
+
+                except Exception as e:
+                    logger.error(f"Error displaying match details: {str(e)}")
+                    st.error(f"Maç detayları gösterilirken bir hata oluştu: {str(e)}")
+                
+                st.markdown("---")  # Maçlar arası ayırıcı
     else:
         st.info("Şu anda canlı maç bulunmuyor.")
 

@@ -25,23 +25,42 @@ class MatchCommentator:
         """Maç istatistiklerine ve olaylara göre yorum üret"""
         try:
             commentary = []
+            
+            # Mevcut dakikayı bul
+            current_minute = events[-1]['time']['elapsed'] if events else 0
+            
+            # Son olayların analizi
+            if events:
+                logger.info("Processing recent events")
+                try:
+                    # Sadece mevcut dakikadan önceki olayları filtrele
+                    valid_events = [event for event in events if event['time']['elapsed'] <= current_minute]
+                    recent_events = valid_events[-3:]  # Son 3 olay
+                    for event in recent_events:
+                        if event['type'] == 'Goal':
+                            commentary.append(f"⚽ {event['time']['elapsed']}. dakikada {event['team']['name']} golü buldu!")
+                        elif event['type'] == 'Card':
+                            commentary.append(f"🟨 {event['time']['elapsed']}. dakikada kart görüldü, oyun sertleşiyor.")
+                except Exception as e:
+                    logger.error(f"Error processing events: {str(e)}")
+                    commentary.append("Maç olayları analiz edilirken bir hata oluştu.")
 
-            # Skor analizi
+            # Skor analizi - olaylardan sonra yapılıyor
             home_score, away_score = score
             if home_score > away_score:
                 score_diff = home_score - away_score
                 if score_diff >= 3:
-                    commentary.append("Ev sahibi takım maça tam hakimiyet kurmuş durumda.")
+                    commentary.insert(0, "Ev sahibi takım maça tam hakimiyet kurmuş durumda.")
                 else:
-                    commentary.append("Ev sahibi takım önde, ancak maç hala dengeli.")
+                    commentary.insert(0, "Ev sahibi takım önde, ancak maç hala dengeli.")
             elif away_score > home_score:
                 score_diff = away_score - home_score
                 if score_diff >= 3:
-                    commentary.append("Deplasman takımı sahada üstünlüğü ele geçirmiş görünüyor.")
+                    commentary.insert(0, "Deplasman takımı sahada üstünlüğü ele geçirmiş görünüyor.")
                 else:
-                    commentary.append("Deplasman takımı önde, fakat maç henüz bitmedi.")
+                    commentary.insert(0, "Deplasman takımı önde, fakat maç henüz bitmedi.")
             else:
-                commentary.append("Şu an için skorlar eşit, her iki takım da üstünlük kurmaya çalışıyor.")
+                commentary.insert(0, "Şu an için skorlar eşit, her iki takım da üstünlük kurmaya çalışıyor.")
 
             # İstatistik analizi
             if match_stats and len(match_stats) >= 2:
@@ -54,82 +73,48 @@ class MatchCommentator:
                     home_possession = float(home_stats[9]['value'].strip('%')) if home_stats[9]['value'] else 50
                     if abs(home_possession - 50) > 10:
                         if home_possession > 50:
-                            commentary.append(f"Ev sahibi takım %{home_possession:.0f} top kontrolüyle oyunu yönlendiriyor.")
+                            commentary.insert(1, f"Ev sahibi takım %{home_possession:.0f} top kontrolüyle oyunu yönlendiriyor.")
                         else:
-                            commentary.append(f"Deplasman takımı %{100-home_possession:.0f} top kontrolüyle oyuna hakim.")
+                            commentary.insert(1, f"Deplasman takımı %{100-home_possession:.0f} top kontrolüyle oyuna hakim.")
 
                     # Şut analizi
                     home_shots = int(home_stats[2]['value'] or 0)
                     away_shots = int(away_stats[2]['value'] or 0)
                     if abs(home_shots - away_shots) > 3:
                         if home_shots > away_shots:
-                            commentary.append(f"Ev sahibi {home_shots} isabetli şutla rakibinden daha etkili.")
+                            commentary.insert(1, f"Ev sahibi {home_shots} isabetli şutla rakibinden daha etkili.")
                         else:
-                            commentary.append(f"Deplasman {away_shots} isabetli şutla pozisyonları değerlendirmede daha başarılı.")
+                            commentary.insert(1, f"Deplasman {away_shots} isabetli şutla pozisyonları değerlendirmede daha başarılı.")
                 except Exception as e:
                     logger.error(f"Error processing match statistics: {str(e)}")
                     commentary.append("İstatistik analizi yapılırken bir hata oluştu.")
-
-            # Son olayların analizi
-            if events:
-                logger.info("Processing recent events")
-                try:
-                    recent_events = events[-3:]  # Son 3 olay
-                    for event in recent_events:
-                        if event['type'] == 'Goal':
-                            commentary.append(f"⚽ {event['time']['elapsed']}. dakikada {event['team']['name']} golü buldu!")
-                        elif event['type'] == 'Card':
-                            commentary.append(f"🟨 {event['time']['elapsed']}. dakikada kart görüldü, oyun sertleşiyor.")
-                except Exception as e:
-                    logger.error(f"Error processing events: {str(e)}")
-                    commentary.append("Maç olayları analiz edilirken bir hata oluştu.")
 
             return " ".join(commentary)
         except Exception as e:
             logger.error(f"Error generating match commentary: {str(e)}")
             return "Maç yorumu oluşturulurken bir hata meydana geldi."
 
-    def predict_next_goal(self, match_stats: Dict, events: List[Dict], betting_odds: Optional[Dict] = None) -> Dict:
-        """Gelişmiş gol tahmini - bahis oranları ve birden fazla model entegrasyonu ile"""
+    def predict_next_goal(self, stats: Dict, events: List[Dict], historical_data: Dict) -> Dict:
+        """Sonraki gol tahmini yap"""
         try:
-            if not match_stats or len(match_stats) < 2:
-                logger.warning("Insufficient match statistics for prediction")
-                return {
-                    'prediction': 'Tahmin için yeterli veri yok',
-                    'probability': 0.0,
-                    'confidence': 'düşük'
-                }
-
-            # ML tabanlı tahmin
-            ml_predictions = self.ml_predictor.predict_goals(match_stats, events)
-
-            # Kural tabanlı tahmin
-            rule_based_pred = self._calculate_rule_based_prediction(
-                match_stats[0]['statistics'], 
-                match_stats[1]['statistics'],
-                events,
-                match_stats
-            )
-
-            # Bahis oranları analizi
-            odds_analysis = self._analyze_betting_odds(betting_odds) if betting_odds else None
-
-            # Tahminleri birleştir
-            combined_predictions = self._combine_all_predictions(
-                ml_predictions,
-                rule_based_pred,
-                odds_analysis,
-                betting_odds
-            )
-
-            return combined_predictions
-
+            # MLPredictor'ı başlat
+            predictor = MLPredictor()
+            
+            # Tahmin yap
+            prediction = predictor.predict_goals(stats, events, historical_data)
+            
+            # Sonucu formatla
+            result = {
+                'prediction': f"Sonraki {prediction['predicted_goals']:.1f} gol",
+                'probability': prediction['ensemble_confidence'],
+                'confidence': 'yüksek' if prediction['ensemble_confidence'] > 0.7 else 'orta' if prediction['ensemble_confidence'] > 0.4 else 'düşük'
+            }
+            
+            return result
+            
         except Exception as e:
-            logger.error(f"Error predicting next goal: {str(e)}")
+            self.logger.error(f"Tahmin hatası: {str(e)}")
             return {
-                'prediction': 'Tahmin hesaplanırken hata oluştu',
-                'probability': 0.0,
-                'confidence': 'düşük',
                 'error': str(e)
             }
 
